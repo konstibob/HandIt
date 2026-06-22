@@ -1,98 +1,217 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { StickerButton } from "../components/ui/StickerButton";
+import { StickerInput } from "../components/ui/StickerInput";
+import { Colors, Control, Fonts, Radius, Spacing } from "../constants/colors";
+import { useLobby } from "../lobby/useLobby";
+import { useRejoin } from "../lobby/useRejoin";
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+const LOGO = require("../../assets/images/hand-it-logo.png");
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
+type Mode = "join" | "create";
+
+export default function HomeScreen() {
+  const [mode, setMode] = useState<Mode>("join");
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const { hostLobby, joinGame, isLoading, error, clearError } = useLobby();
+  const { isChecking } = useRejoin();
+
+  function switchMode(next: Mode) {
+    setMode(next);
+    clearError();
   }
-  if (Device.isDevice) {
+
+  const aliasOk = name.trim().length >= 2;
+  const codeOk = code.trim().length === 6;
+  const canSubmit = mode === "join" ? aliasOk && codeOk : aliasOk;
+
+  function handleSubmit() {
+    if (!canSubmit || isLoading) return;
+    if (mode === "join") {
+      joinGame(code.trim(), name.trim());
+    } else {
+      hostLobby(name.trim());
+    }
+  }
+
+  if (isChecking) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View style={styles.centered}>
+        <ActivityIndicator color={Colors.red500} size="large" />
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <SafeAreaView style={styles.safe}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Logo — the master sticker, the only illustration on the screen */}
+        <Image source={LOGO} style={styles.logo} resizeMode="contain" />
+
+        <Text style={styles.tagline}>
+          The social assassination party game. Find your target. Make the
+          handoff. Don't get caught.
+        </Text>
+
+        {/* Segmented control — active mode is a solid red pill */}
+        <View style={styles.segment}>
+          <SegmentButton
+            label="Join Room"
+            active={mode === "join"}
+            onPress={() => switchMode("join")}
+          />
+          <SegmentButton
+            label="Create"
+            active={mode === "create"}
+            onPress={() => switchMode("create")}
+          />
+        </View>
+
+        {/* Fields sit directly on the dark ground — no card wrapper */}
+        <View style={styles.form}>
+          <StickerInput
+            label="Your alias"
+            required
+            placeholder="e.g. Backstabber Bob"
+            value={name}
+            onChangeText={setName}
+            maxLength={20}
+            autoFocus
+          />
+
+          {mode === "join" && (
+            <StickerInput
+              label="Room code"
+              code
+              placeholder="XKCD"
+              value={code}
+              onChangeText={(t) => setCode(t.toUpperCase())}
+              maxLength={6}
+              autoCapitalize="characters"
+            />
+          )}
+
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          <StickerButton
+            label={mode === "join" ? "Join the Hunt" : "Create Room"}
+            onPress={handleSubmit}
+            disabled={!canSubmit}
+            loading={isLoading}
+          />
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
-export default function HomeScreen() {
+function SegmentButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <Pressable
+      onPress={onPress}
+      style={[styles.segBtn, active && styles.segBtnActive]}
+    >
+      <Text style={[styles.segText, active && styles.segTextActive]}>
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    backgroundColor: Colors.bgBase,
   },
-  safeArea: {
+  centered: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
+    backgroundColor: Colors.bgBase,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  scroll: {
+    flexGrow: 1,
+    alignItems: "center",
+    paddingHorizontal: Control.gutter,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.xl,
+    maxWidth: Control.screenMax,
+    alignSelf: "center",
+    width: "100%",
+  },
+  logo: {
+    width: 168,
+    height: 168,
+    marginTop: Spacing.sm,
+  },
+  tagline: {
+    fontFamily: Fonts.body,
+    fontSize: 15,
+    color: Colors.textMuted,
+    textAlign: "center",
+    lineHeight: 21,
+    maxWidth: 260,
+    marginBottom: Spacing.md + 6,
+  },
+  segment: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    width: "100%",
+    maxWidth: 300,
+    backgroundColor: Colors.bgSunken,
+    borderWidth: 3,
+    borderColor: Colors.ink900,
+    borderRadius: Radius.pill,
+    padding: 4,
+    marginBottom: Spacing.lg,
+  },
+  segBtn: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    height: 40,
+    borderRadius: Radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  title: {
-    textAlign: 'center',
+  segBtnActive: {
+    backgroundColor: Colors.red500,
   },
-  code: {
-    textTransform: 'uppercase',
+  segText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: Colors.textMuted,
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+  segTextActive: {
+    color: Colors.textStrong,
+  },
+  form: {
+    width: "100%",
+    maxWidth: 300,
+    gap: Spacing.md,
+  },
+  error: {
+    fontFamily: Fonts.body,
+    fontSize: 14,
+    color: Colors.red400,
   },
 });
