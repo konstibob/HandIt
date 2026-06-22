@@ -45,6 +45,7 @@ example
 #AI ahh folders
 /.agents
 /.claude
+/.vscode
 
 #notetaking folders
 /designSystem
