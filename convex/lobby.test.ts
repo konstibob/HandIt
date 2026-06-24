@@ -272,6 +272,37 @@ describe("confirmKilled", () => {
     expect(after.find((p) => p._id === killer._id)?.kills).toBe(2);
   });
 
+  test("winner is the most-killing player even if they were eliminated", async () => {
+    // The star racks up two kills, then gets handed the card themselves before
+    // the game ends — they still win, because winning is purely most kills.
+    const { gameId, players } = await makeGame(t, ["A", "B", "C", "D", "E"]);
+    await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });
+
+    let roster = await readPlayers(t, gameId);
+    let byId = new Map(roster.map((p) => [p._id, p]));
+    const star = roster[0];
+
+    // Two kills in a row (the star inherits each victim's target).
+    const first = byId.get(star.currentTarget!)!;
+    await t.mutation(api.lobby.confirmKilled, { playerId: first._id });
+    roster = await readPlayers(t, gameId);
+    byId = new Map(roster.map((p) => [p._id, p]));
+    const second = byId.get(byId.get(star._id)!.currentTarget!)!;
+    await t.mutation(api.lobby.confirmKilled, { playerId: second._id });
+
+    // Now the star's own hunter takes them out → two survivors, game ends.
+    await t.mutation(api.lobby.confirmKilled, { playerId: star._id });
+
+    const game = await readGame(t, gameId);
+    expect(game?.phase).toBe("ended");
+    expect(game?.winnerId).toBe(star._id);
+
+    const after = await readPlayers(t, gameId);
+    const starAfter = after.find((p) => p._id === star._id)!;
+    expect(starAfter.kills).toBe(2);
+    expect(starAfter.status).toBe("dead"); // crowned despite being out
+  });
+
   test("throws if the game isn't running", async () => {
     const { players } = await makeGame(t, ["A", "B", "C"]);
     // Not started yet.
@@ -409,5 +440,80 @@ describe("query privacy", () => {
     const survivor = (await readPlayers(t, gameId)).find((p) => p.status === "alive")!;
     const circle = await t.query(api.lobby.getHuntCircle, { playerId: survivor._id });
     expect(circle).not.toBeNull();
+  });
+});
+
+// ── End-of-game standings ───────────────────────────────────────────────────────
+
+describe("getResults", () => {
+  let t: T;
+  beforeEach(() => {
+    t = convexTest(schema, modules);
+  });
+
+  test("is withheld until the game has ended", async () => {
+    const { gameCode, players } = await makeGame(t, ["A", "B", "C"]);
+    await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });
+    expect(await t.query(api.lobby.getResults, { gameCode })).toBeNull();
+  });
+
+  test("returns kill-sorted standings, flags the winner, and leaks no ids", async () => {
+    const { gameId, gameCode, players } = await makeGame(t, ["A", "B", "C"]);
+    await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });
+
+    const roster = await readPlayers(t, gameId);
+    const victim = roster[0];
+    const hunter = hunterOf(roster, victim._id)!;
+    await t.mutation(api.lobby.confirmKilled, { playerId: victim._id });
+
+    const results = await t.query(api.lobby.getResults, { gameCode });
+    expect(results).not.toBeNull();
+    expect(results!.players).toHaveLength(3);
+
+    // The lone killer tops the board and is the sole winner.
+    expect(results!.players[0].name).toBe(hunter.name);
+    expect(results!.players[0].kills).toBe(1);
+    expect(results!.players[0].isWinner).toBe(true);
+    expect(results!.winnerNames).toEqual([hunter.name]);
+
+    const victimRow = results!.players.find((p) => p.name === victim.name)!;
+    expect(victimRow.survivedSeconds).not.toBeNull();
+
+    for (const p of results!.players) {
+      expect(Object.keys(p).sort()).toEqual([
+        "isWinner",
+        "kills",
+        "name",
+        "status",
+        "survivedSeconds",
+      ]);
+    }
+  });
+
+  test("a kill tie yields co-winners", async () => {
+    const { gameId, gameCode, players } = await makeGame(t, ["A", "B", "C", "D"]);
+    await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });
+
+    // Two different players each take one kill, leaving them tied at the end.
+    let roster = await readPlayers(t, gameId);
+    let byId = new Map(roster.map((p) => [p._id, p]));
+    const k1 = roster[0];
+    const firstTarget = byId.get(k1.currentTarget!)!;
+    await t.mutation(api.lobby.confirmKilled, { playerId: firstTarget._id });
+
+    roster = await readPlayers(t, gameId);
+    byId = new Map(roster.map((p) => [p._id, p]));
+    const mid = byId.get(byId.get(k1._id)!.currentTarget!)!; // k1 now hunts mid
+    const midTarget = byId.get(mid.currentTarget!)!;
+    await t.mutation(api.lobby.confirmKilled, { playerId: midTarget._id });
+
+    const game = await readGame(t, gameId);
+    expect(game?.phase).toBe("ended");
+
+    const results = await t.query(api.lobby.getResults, { gameCode });
+    expect(results!.winnerNames.sort()).toEqual([k1.name, mid.name].sort());
+    const winners = results!.players.filter((p) => p.isWinner);
+    expect(winners).toHaveLength(2);
+    expect(winners.every((w) => w.kills === 1)).toBe(true);
   });
 });

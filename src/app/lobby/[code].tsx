@@ -84,7 +84,7 @@ export default function LobbyScreen() {
     return <GameScreen players={players} playerName={playerName} gameCode={game.gameCode} />;
   }
   if (game.phase === "ended") {
-    return <EndScreen game={game} players={players} playerName={playerName} />;
+    return <EndScreen playerName={playerName} gameCode={game.gameCode} />;
   }
 
   return (

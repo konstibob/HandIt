@@ -48,3 +48,26 @@ export function setRevealedTarget(playerId: string, targetName: string): void {
     // Storage unavailable — the reveal just replays next time, no harm.
   }
 }
+
+// Remembers whether the end-of-game leaderboard reveal already played for a
+// given game, so a page refresh shows the final standings instantly instead of
+// replaying the animation. Keyed by game code; localStorage is per-browser, so
+// each client tracks its own playback.
+
+const RESULTS_KEY = "handit_revealed_results";
+
+export function getRevealedResults(gameCode: string): boolean {
+  try {
+    return localStorage.getItem(`${RESULTS_KEY}:${gameCode}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function setRevealedResults(gameCode: string): void {
+  try {
+    localStorage.setItem(`${RESULTS_KEY}:${gameCode}`, "1");
+  } catch {
+    // Storage unavailable — the reveal just replays next time, no harm.
+  }
+}

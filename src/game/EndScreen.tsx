@@ -1,48 +1,77 @@
-import { ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import { ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Avatar } from "../components/ui/Avatar";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import { Leaderboard } from "./Leaderboard";
+import { KillFeed } from "./KillFeed";
+import { RingGraph } from "./RingGraph";
 import { StickerButton } from "../components/ui/StickerButton";
-import { Colors, Fonts, Radius, Spacing, Sticker } from "../constants/colors";
+import {
+  SegmentControl,
+  type SegmentOption,
+} from "../components/ui/SegmentControl";
+import { Colors, Fonts, Spacing } from "../constants/colors";
 import { useLobby } from "../lobby/useLobby";
-import type { PublicGame, PublicPlayer } from "../lobby/lobbyHelpers";
+import { getPlayerSession } from "../lib/storage";
+import type { Id } from "../../convex/_generated/dataModel";
 
 type Props = {
-  game: PublicGame;
-  players: PublicPlayer[];
   playerName: string | null;
+  gameCode: string;
 };
 
-// The end screen — shown to EVERYONE (alive and eliminated) once the game ends.
-// Reveals the winner: the survivor with the most kills.
-export function EndScreen({ game, players, playerName }: Props) {
-  const { leaveLobby, isLoading } = useLobby();
+type Tab = "results" | "feed" | "ring";
 
-  const winnerName = game.winnerName;
-  const winner = winnerName
-    ? players.find((p) => p.name === winnerName) ?? null
-    : null;
-  const iWon = winnerName != null && winnerName === playerName;
+// Shown to EVERYONE (alive and eliminated) once the game ends. The headline +
+// leaderboard crown the player with the most kills overall (ties = co-winners);
+// surviving to the final two carries no special weight. The kill feed and the
+// (now-public) ring graph stay browsable, and anyone can head back home.
+export function EndScreen({ playerName, gameCode }: Props) {
+  const { leaveLobby, isLoading } = useLobby();
+  const [tab, setTab] = useState<Tab>("results");
+
+  const session = getPlayerSession();
+  const playerId = (session?.playerId ?? null) as Id<"players"> | null;
+
+  const results = useQuery(api.lobby.getResults, { gameCode });
+  const feed = useQuery(api.lobby.getKillFeed, { gameCode });
+  // The ring is gated server-side; once the game has ended it's shown to all.
+  const huntCircle = useQuery(
+    api.lobby.getHuntCircle,
+    playerId ? { playerId } : "skip"
+  );
+
+  const tabs: SegmentOption<Tab>[] = [
+    { key: "results", label: "Results" },
+    { key: "feed", label: "Kill feed" },
+    { key: "ring", label: "Ring" },
+  ];
 
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.kicker}>Game over</Text>
+        <Text style={styles.headline}>
+          {winnerLine(results?.winnerNames, results?.players)}
+        </Text>
 
-        <View style={[styles.card, styles.winnerCard]}>
-          <View style={styles.crown}>
-            <Text style={styles.crownText}>WINNER</Text>
-          </View>
-          <View style={styles.avatarWrap}>
-            <Avatar name={winnerName ?? "?"} size={120} />
-          </View>
-          <Text style={styles.winnerName}>{winnerName ?? "—"}</Text>
-          <Text style={styles.winnerKills}>
-            {winner?.kills ?? 0} {(winner?.kills ?? 0) === 1 ? "kill" : "kills"}
-          </Text>
-          <Text style={styles.verdict}>
-            {iWon ? "That's you. You handed it to everyone." : "Outlasted the ring."}
-          </Text>
-        </View>
+        <SegmentControl options={tabs} value={tab} onChange={setTab} />
+
+        {tab === "results" &&
+          (results ? (
+            <Leaderboard
+              rows={results.players}
+              playerName={playerName}
+              gameCode={gameCode}
+            />
+          ) : (
+            <Text style={styles.loading}>Tallying the handoffs…</Text>
+          ))}
+
+        {tab === "feed" && <KillFeed entries={feed?.entries} />}
+
+        {tab === "ring" && <RingGraph circle={huntCircle} you={playerName} />}
 
         <StickerButton
           label="Back to home"
@@ -55,74 +84,51 @@ export function EndScreen({ game, players, playerName }: Props) {
   );
 }
 
+// "Mia wins with 4 kills" / "Mia & Jonas tie for the win — 3 kills each".
+function winnerLine(
+  names: string[] | undefined,
+  players: { name: string; kills: number }[] | undefined
+): string {
+  if (!names || names.length === 0) return "The hunt is over.";
+  const kills = players?.find((p) => p.name === names[0])?.kills ?? 0;
+  const tally = `${kills} ${kills === 1 ? "kill" : "kills"}`;
+  if (names.length === 1) return `${names[0]} wins with ${tally}.`;
+  const last = names[names.length - 1];
+  const rest = names.slice(0, -1).join(", ");
+  return `${rest} & ${last} tie for the win — ${tally} each.`;
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: Colors.bgBase },
   scroll: {
     padding: Spacing.md,
-    gap: Spacing.lg,
+    gap: Spacing.md,
     maxWidth: 430,
     width: "100%",
     alignSelf: "center",
     flexGrow: 1,
-    justifyContent: "center",
   },
   kicker: {
     fontFamily: Fonts.stamp,
-    fontSize: 14,
+    fontSize: 13,
     color: Colors.textFaint,
     letterSpacing: 3,
     textAlign: "center",
     textTransform: "uppercase",
   },
-  card: {
-    backgroundColor: Colors.bgElevated,
-    borderWidth: Sticker.borderWidth,
-    borderColor: Colors.ink800,
-    borderRadius: Radius.lg,
-    padding: Spacing.lg,
-    alignItems: "center",
-  },
-  winnerCard: {
-    borderColor: Colors.gold500,
-    shadowColor: Colors.ink900,
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 4,
-  },
-  crown: {
-    backgroundColor: Colors.gold500,
-    borderWidth: 2,
-    borderColor: Colors.ink800,
-    borderRadius: Radius.pill,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 5,
-  },
-  crownText: {
-    fontFamily: Fonts.stamp,
-    fontSize: 12,
-    letterSpacing: 2,
-    color: Colors.ink900,
-  },
-  avatarWrap: { marginVertical: Spacing.lg },
-  winnerName: {
+  headline: {
     fontFamily: Fonts.display,
-    fontSize: 34,
+    fontSize: 24,
     color: Colors.textStrong,
     textAlign: "center",
+    lineHeight: 30,
+    marginBottom: Spacing.xs,
   },
-  winnerKills: {
-    fontFamily: Fonts.bodyBold,
-    fontSize: 16,
-    color: Colors.gold500,
-    marginTop: 4,
-  },
-  verdict: {
+  loading: {
     fontFamily: Fonts.body,
     fontSize: 14,
-    color: Colors.textMuted,
+    color: Colors.textFaint,
     textAlign: "center",
-    marginTop: Spacing.sm,
-    lineHeight: 20,
+    paddingVertical: Spacing.xl,
   },
 });

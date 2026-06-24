@@ -182,6 +182,52 @@ export const getKillFeed = query({
   },
 });
 
+// The end-of-game standings, shown on the result screen to everyone. Only
+// available once the game has ended. Like getLobby, no ids/targets leave the
+// server — players are referenced by their lobby-unique names. Each row carries
+// the two ranking stats: total kills (the winner metric) and how long the
+// player survived. Winner(s) = the highest kill count; ties yield co-winners.
+export const getResults = query({
+  args: { gameCode: v.string() },
+  handler: async (ctx, { gameCode }) => {
+    const game = await ctx.db
+      .query("games")
+      .withIndex("by_gameCode", (q) => q.eq("gameCode", gameCode))
+      .unique();
+    if (!game || game.phase !== "ended") return null;
+
+    const roster = await playersInGame(ctx, game._id);
+    const maxKills = roster.reduce((m, p) => Math.max(m, p.kills ?? 0), 0);
+    // The two survivors have no eliminatedAt, so they "survived" until the game
+    // ended. endedAt is set the moment the game ends; fall back to now defensively.
+    const end = game.endedAt ?? Date.now();
+
+    const players = roster
+      .map((p) => ({
+        name: p.name,
+        kills: p.kills ?? 0,
+        status: p.status,
+        // null only if startedAt was somehow never recorded.
+        survivedSeconds:
+          game.startedAt != null
+            ? Math.round(((p.eliminatedAt ?? end) - game.startedAt) / 1000)
+            : null,
+        isWinner: maxKills > 0 && (p.kills ?? 0) === maxKills,
+      }))
+      .sort(
+        (a, b) =>
+          b.kills - a.kills ||
+          (b.survivedSeconds ?? 0) - (a.survivedSeconds ?? 0) ||
+          a.name.localeCompare(b.name)
+      );
+
+    return {
+      players,
+      winnerNames: players.filter((p) => p.isWinner).map((p) => p.name),
+    };
+  },
+});
+
 // ─── Game logic ───────────────────────────────────────────────────────────────
 
 // Hand the host role to another player when the current host departs.
@@ -243,25 +289,23 @@ async function eliminate(
     (p) => p.status === "alive" && p._id !== victim._id
   );
   if (aliveAfter.length <= 2) {
-    // Re-read finalists for fresh kill counts (the hunter just gained one).
-    const finalists = (
-      await Promise.all(aliveAfter.map((p) => ctx.db.get(p._id)))
-    ).filter((p): p is Doc<"players"> => p !== null);
-    // Winner = most kills; deterministic creation-order tiebreak for now.
-    finalists.sort(
+    // The game is over. Re-read the whole roster so kill counts reflect the
+    // just-applied patches (the hunter just gained one), then crown the player
+    // with the most kills across the ENTIRE game — not just the two survivors.
+    // Outlasting the ring grants no special claim; creation order breaks ties.
+    const finalRoster = await playersInGame(ctx, game._id);
+    const ranked = [...finalRoster].sort(
       (a, b) =>
         (b.kills ?? 0) - (a.kills ?? 0) || a._creationTime - b._creationTime
     );
     const endedAt = Date.now();
     await ctx.db.patch(game._id, {
       phase: "ended",
-      winnerId: finalists[0]?._id,
+      winnerId: ranked[0]?._id,
       endedAt,
     });
 
-    // Raw atoms for analytics — averages/totals are derived in PostHog. Re-read
-    // the roster so kill counts reflect the just-applied patches.
-    const finalRoster = await playersInGame(ctx, game._id);
+    // Raw atoms for analytics — averages/totals are derived in PostHog.
     await ctx.scheduler.runAfter(0, internal.analytics.capture, {
       event: AnalyticsEvent.gameEnded,
       distinctId: game.gameCode,

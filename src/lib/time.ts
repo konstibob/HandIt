@@ -11,3 +11,18 @@ export function relativeTime(timestamp: number, now: number = Date.now()): strin
   const days = Math.round(hours / 24);
   return `${days} day${days > 1 ? "s" : ""} ago`;
 }
+
+// A compact label for a span of seconds ("45s", "8m 30s", "1h 2m"). Used by the
+// end-of-game leaderboard to show how long each player survived.
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s}s`;
+  const mins = Math.floor(s / 60);
+  if (mins < 60) {
+    const rem = s % 60;
+    return rem ? `${mins}m ${rem}s` : `${mins}m`;
+  }
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins ? `${hours}h ${remMins}m` : `${hours}h`;
+}
