@@ -1,56 +1,86 @@
-# Welcome to your Expo app 👋
+# Hand It 🤝
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A social assassination party game — think real-life tag. Players join a lobby
+with a room code, each is secretly assigned a target (the targets form one big
+loop, so everyone is hunting someone and hunted by someone), and you score by
+"handing it" to your mark in real life. Last one standing wins.
 
-## Get started
+It's **web-first**: everyone just opens the game in a browser on their phone or
+laptop and joins the same room code — no app install, no accounts.
 
-1. Install dependencies
+## Tech stack
 
-   ```bash
-   npm install
-   ```
+- **[Expo](https://docs.expo.dev/) SDK 56** + **Expo Router** — file-based routing, rendered to web via `react-native-web`.
+- **[Convex](https://convex.dev)** — real-time backend. Lobby state and game state sync live over a WebSocket, so every player's screen updates instantly.
+- No auth: a player is identified by their Convex id, stored in the browser's `localStorage`.
 
-2. Start the app
+## Project layout
 
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```
+convex/            Backend — schema + game logic (lobby.ts), runs on Convex
+src/
+  app/             Screens & routing
+    index.tsx      Home: create or join a room
+    lobby/[code]   Lobby + in-game + end screen (branches on game phase)
+  lobby/           Lobby hooks & components (mutations, live state, player rows)
+  game/            In-game and end-of-game screens
+  components/ui/   Design-system widgets (sticker buttons, inputs, avatars)
+  constants/       Design tokens (colors, fonts, spacing)
+  lib/             Helpers (room-code generation, localStorage session)
+scripts/           Dev tooling (e.g. the multi-player test launcher)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Running it locally
 
-### Other setup steps
+You need **two servers running at once** (use two terminals):
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+# Terminal 1 — the Convex backend (pushes schema + functions, watches for changes)
+npx convex dev
 
-## Learn more
+# Terminal 2 — the Expo web dev server
+npm run web          # serves at http://localhost:8081
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+Then open http://localhost:8081 in a browser to play.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+> First-time setup: `npm install` once to pull dependencies.
 
-## Join the community
+## Testing with multiple players
 
-Join our community of developers creating universal apps.
+A party game needs several players at once. Instead of juggling Chrome,
+Firefox, and your phone, there's a launcher that opens several **isolated**
+browser windows — each one is a separate session, so the backend treats them as
+different players.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+# Terminal 3 — with the two servers above already running
+npm run players              # opens 4 player windows, tiled on screen
+npm run players 6            # open 6 instead
+npm run players 3 http://localhost:8082   # custom count + URL (if Expo picked another port)
+```
+
+It only opens the windows — you create the lobby in one and join from the rest
+by hand. Press `Ctrl+C` in that terminal to close them all.
+
+> If `npm run web` reports a port other than `8081`, pass it as the second
+> argument to `npm run players` (e.g. `npm run players 4 http://localhost:8082`).
+
+## All scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run web` | Start the Expo **web** dev server (main way you run the game) |
+| `npx convex dev` | Start/sync the Convex backend — must be running alongside the web server |
+| `npm run players` | Open several isolated browser windows for multi-player testing |
+| `npm run android` / `npm run ios` | Start the dev server for a native device/emulator |
+| `npm test` | Run the Convex backend tests (Vitest) once |
+| `npm run test:watch` | Run the tests in watch mode |
+| `npm run lint` | Lint the project |
+
+## Convex notes
+
+When changing anything under `convex/`, **read
+`convex/_generated/ai/guidelines.md` first** — it has rules that override
+general Convex knowledge. The Convex project is `lovable-kangaroo-347`
+(eu-west-1).
