@@ -1,5 +1,6 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import type { PublicPlayer } from "./lobbyHelpers";
+import { Avatar } from "../components/ui/Avatar";
 import { Colors, Fonts, Spacing, Sticker } from "../constants/colors";
 
 type Props = {
@@ -11,9 +12,13 @@ type Props = {
 
 export function PlayerRow({ player, isCurrentPlayer, viewerIsHost, onRemove }: Props) {
   return (
-    <View style={styles.row}>
+    <View style={[styles.row, isCurrentPlayer && styles.rowMe]}>
+      <Avatar name={player.name} size={42} ring={false} />
+
       <View style={styles.nameSection}>
-        <Text style={styles.name}>{player.name}</Text>
+        <Text style={styles.name} numberOfLines={1}>
+          {player.name}
+        </Text>
         <View style={styles.badges}>
           {player.isHost && <Badge label="HOST" color={Colors.gold500} textColor={Colors.ink900} />}
           {isCurrentPlayer && <Badge label="YOU" color={Colors.bgElevated} textColor={Colors.textMuted} />}
@@ -54,17 +59,22 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: "row",
     alignItems: "center",
+    gap: Spacing.md,
     backgroundColor: Colors.bgSurface,
     borderWidth: Sticker.borderWidth,
     borderColor: Colors.ink800,
     borderRadius: 14,
     paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm + 4,
+    paddingVertical: Spacing.sm + 2,
     shadowColor: Colors.ink900,
     shadowOffset: { width: 3, height: 3 },
     shadowOpacity: 1,
     shadowRadius: 0,
     elevation: 3,
+  },
+  rowMe: {
+    borderColor: Colors.gold600,
+    backgroundColor: Colors.bgElevated,
   },
   nameSection: {
     flex: 1,
@@ -73,6 +83,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   name: {
+    flexShrink: 1,
     fontFamily: Fonts.bodyBold,
     fontSize: 17,
     color: Colors.textBody,

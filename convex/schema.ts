@@ -11,6 +11,10 @@ export default defineSchema({
     ),
     // Set when the game ends (2 players remain): the player with the most kills.
     winnerId: v.optional(v.id("players")),
+    // Wall-clock timestamps (ms) used only for analytics: game duration =
+    // endedAt - startedAt. Absent on lobbies that never started.
+    startedAt: v.optional(v.number()),
+    endedAt: v.optional(v.number()),
   }).index("by_gameCode", ["gameCode"]),
 
   players: defineTable({
