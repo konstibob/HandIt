@@ -24,5 +24,7 @@ export default defineSchema({
     kills: v.optional(v.number()),
     placement: v.optional(v.number()),
     eliminatedAt: v.optional(v.number()),
+    // Who handed this player the card (set in eliminate()). Powers the kill feed.
+    killedBy: v.optional(v.id("players")),
   }).index("by_gameId", ["gameId"]),
 });

@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Avatar } from "../components/ui/Avatar";
 import { TargetReveal } from "./TargetReveal";
+import { GameInsights } from "./GameInsights";
+import { RingGraph } from "./RingGraph";
 import { StickerButton } from "../components/ui/StickerButton";
+import { SegmentControl, type SegmentOption } from "../components/ui/SegmentControl";
 import { Colors, Fonts, Radius, Spacing, Sticker } from "../constants/colors";
 import { useLobby } from "../lobby/useLobby";
 import { getPlayerSession } from "../lib/storage";
@@ -15,54 +18,77 @@ import type { Id } from "../../convex/_generated/dataModel";
 type Props = {
   players: PublicPlayer[];
   playerName: string | null;
+  gameCode: string;
 };
 
-// The core gameplay screen (port of designSystem TargetScreen.jsx). Shows the
-// player their secret target and the running stats. Unlike the design mock, the
-// big destructive action is the VICTIM confirming their own elimination —
-// "I was killed" — which credits their hunter and tightens the ring.
+type Tab = "target" | "game" | "ring";
+
+// The core gameplay screen (port of designSystem TargetScreen.jsx). Tabbed:
+// alive players get [Target | Game]; when you die the Target tab gives way to a
+// dead-only [Game | Ring]. "Game" is the shared insights view (kill feed +
+// roster); "Ring" is the spoiler graph, only ever shown to the dead.
 //
 // The secret target is NOT in the public roster — it's fetched via myTarget,
 // keyed by the caller's own (private) player id, so no one else can read it.
-export function GameScreen({ players, playerName }: Props) {
+export function GameScreen({ players, playerName, gameCode }: Props) {
   const { confirmKilled, leaveLobby, isLoading } = useLobby();
   const [armed, setArmed] = useState(false);
+  const [tab, setTab] = useState<Tab>("target");
 
   const session = getPlayerSession();
   const playerId = (session?.playerId ?? null) as Id<"players"> | null;
-  const targetResult = useQuery(
-    api.lobby.myTarget,
-    playerId ? { playerId } : "skip"
-  );
-  const targetName = targetResult?.targetName ?? null;
 
   const me = players.find((p) => p.name === playerName) ?? null;
   const aliveCount = players.filter((p) => p.status === "alive").length;
   const myKills = me?.kills ?? 0;
   const dead = me?.status === "dead";
 
+  const targetResult = useQuery(
+    api.lobby.myTarget,
+    playerId ? { playerId } : "skip"
+  );
+  const targetName = targetResult?.targetName ?? null;
+
+  // Kill feed is public; the ring is spoiler-gated server-side (null unless dead).
+  const feed = useQuery(api.lobby.getKillFeed, { gameCode });
+  const huntCircle = useQuery(
+    api.lobby.getHuntCircle,
+    dead && playerId ? { playerId } : "skip"
+  );
+
+  // Tabs swap on death. If the active tab is no longer valid (e.g. you were on
+  // "Target" when you died), fall back to the first available tab.
+  const tabs: SegmentOption<Tab>[] = dead
+    ? [{ key: "game", label: "Game" }, { key: "ring", label: "Ring" }]
+    : [{ key: "target", label: "Target" }, { key: "game", label: "Game" }];
+
+  useEffect(() => {
+    if (!tabs.some((t) => t.key === tab)) setTab(tabs[0].key);
+  }, [dead]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Stats row */}
+        {/* Stats row — always visible */}
         <View style={styles.statsRow}>
           <StatCard value={aliveCount} label="Still alive" color={Colors.alive} />
           <StatCard value={myKills} label="Your kills" color={Colors.gold500} />
         </View>
 
-        {dead ? (
-          <View style={[styles.card, styles.cardRaised, styles.cardDead]}>
-            <View style={styles.avatarWrap}>
-              <Avatar name={me?.name ?? "?"} state="dead" size={104} />
-            </View>
-            <Text style={styles.targetName}>You got handed it</Text>
-            <Text style={styles.copy}>
-              You're out of the game. Sit tight and watch how the ring closes.
+        {dead && (
+          <View style={styles.outBanner}>
+            <Text style={styles.outBannerTitle}>You're out</Text>
+            <Text style={styles.outBannerCopy}>
+              You got handed it. Sit tight and watch how the ring closes.
             </Text>
           </View>
-        ) : (
+        )}
+
+        <SegmentControl options={tabs} value={tab} onChange={setTab} />
+
+        {/* ── Target tab (alive only) ── */}
+        {tab === "target" && !dead && (
           <>
-            {/* Target card */}
             <View style={[styles.card, styles.cardRaised, styles.cardRed]}>
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>YOUR TARGET</Text>
@@ -112,7 +138,6 @@ export function GameScreen({ players, playerName }: Props) {
               )}
             </View>
 
-            {/* Warning */}
             <View style={[styles.card, styles.cardFlat, styles.warnCard]}>
               <Text style={styles.warnText}>
                 <Text style={styles.warnStrong}>Someone is hunting you too. </Text>
@@ -120,6 +145,20 @@ export function GameScreen({ players, playerName }: Props) {
               </Text>
             </View>
           </>
+        )}
+
+        {/* ── Game tab (everyone): kill feed + roster ── */}
+        {tab === "game" && (
+          <GameInsights
+            players={players}
+            feed={feed?.entries}
+            playerName={playerName}
+          />
+        )}
+
+        {/* ── Ring tab (dead only): the spoiler graph ── */}
+        {tab === "ring" && dead && (
+          <RingGraph circle={huntCircle} you={playerName} />
         )}
 
         <TouchableOpacity
@@ -180,7 +219,27 @@ const styles = StyleSheet.create({
   },
   cardFlat: {},
   cardRed: { borderColor: Colors.red500, alignItems: "center", paddingVertical: Spacing.lg },
-  cardDead: { borderColor: Colors.dead, alignItems: "center", paddingVertical: Spacing.lg },
+
+  outBanner: {
+    backgroundColor: Colors.bgElevated,
+    borderWidth: Sticker.borderWidth,
+    borderColor: Colors.dead,
+    borderRadius: Radius.lg,
+    padding: Spacing.md,
+    alignItems: "center",
+  },
+  outBannerTitle: {
+    fontFamily: Fonts.display,
+    fontSize: 20,
+    color: Colors.textStrong,
+  },
+  outBannerCopy: {
+    fontFamily: Fonts.body,
+    fontSize: 13,
+    color: Colors.textMuted,
+    textAlign: "center",
+    marginTop: 2,
+  },
 
   statCard: { flex: 1, alignItems: "center", paddingVertical: Spacing.sm + 4 },
   statValue: { fontFamily: Fonts.display, fontSize: 30 },

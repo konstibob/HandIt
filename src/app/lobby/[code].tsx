@@ -80,7 +80,7 @@ export default function LobbyScreen() {
     if (sawJoinable.current && !introDone) {
       return <StartCountdown onDone={() => setIntroDone(true)} />;
     }
-    return <GameScreen players={players} playerName={playerName} />;
+    return <GameScreen players={players} playerName={playerName} gameCode={game.gameCode} />;
   }
   if (game.phase === "ended") {
     return <EndScreen game={game} players={players} playerName={playerName} />;

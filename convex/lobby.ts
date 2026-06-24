@@ -150,6 +150,36 @@ export const getHuntCircle = query({
   },
 });
 
+// The kill feed: every elimination so far as "<killer> handed it to <victim>".
+// Public — visible to all players (alive included). Like getLobby, ids never
+// leave the server; killer/victim are referenced by their lobby-unique names.
+// Showing the killer reveals a *past* ring edge, which is expected in an
+// assassin game; current targets stay secret (those live only in myTarget).
+export const getKillFeed = query({
+  args: { gameCode: v.string() },
+  handler: async (ctx, { gameCode }) => {
+    const game = await ctx.db
+      .query("games")
+      .withIndex("by_gameCode", (q) => q.eq("gameCode", gameCode))
+      .unique();
+    if (!game) return { entries: [] };
+
+    const roster = await playersInGame(ctx, game._id);
+    const nameById = new Map(roster.map((p) => [p._id, p.name]));
+
+    const entries = roster
+      .filter((p) => p.status === "dead" && p.eliminatedAt !== undefined)
+      .sort((a, b) => (b.eliminatedAt ?? 0) - (a.eliminatedAt ?? 0)) // newest first
+      .map((p) => ({
+        victimName: p.name,
+        killerName: p.killedBy ? nameById.get(p.killedBy) ?? null : null,
+        eliminatedAt: p.eliminatedAt as number,
+      }));
+
+    return { entries };
+  },
+});
+
 // ─── Game logic ───────────────────────────────────────────────────────────────
 
 // Hand the host role to another player when the current host departs.
@@ -186,11 +216,13 @@ async function eliminate(
     });
   }
 
-  // The victim is out. Clearing currentTarget removes the field.
+  // The victim is out. Clearing currentTarget removes the field. Record who got
+  // them (the hunter) so the kill feed can show "<hunter> handed it to <victim>".
   await ctx.db.patch(victim._id, {
     status: "dead",
     eliminatedAt: Date.now(),
     currentTarget: undefined,
+    killedBy: hunter?._id,
   });
 
   // End condition: the game stops with two survivors (never down to one).
