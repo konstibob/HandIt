@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Avatar } from "../components/ui/Avatar";
+import { TargetReveal } from "./TargetReveal";
 import { StickerButton } from "../components/ui/StickerButton";
 import { Colors, Fonts, Radius, Spacing, Sticker } from "../constants/colors";
 import { useLobby } from "../lobby/useLobby";
@@ -66,10 +67,19 @@ export function GameScreen({ players, playerName }: Props) {
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>YOUR TARGET</Text>
               </View>
-              <View style={styles.avatarWrap}>
-                <Avatar name={targetName ?? "?"} size={104} />
-              </View>
-              <Text style={styles.targetName}>{targetName ?? "—"}</Text>
+              {targetName ? (
+                <TargetReveal
+                  names={players.map((p) => p.name)}
+                  finalName={targetName}
+                />
+              ) : (
+                <>
+                  <View style={styles.avatarWrap}>
+                    <Avatar name="?" size={104} />
+                  </View>
+                  <Text style={styles.targetName}>—</Text>
+                </>
+              )}
               <Text style={styles.copy}>
                 Slip them the card without anyone watching. They confirm the
                 handoff on their own phone.

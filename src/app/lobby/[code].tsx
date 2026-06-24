@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { PlayerRow } from "../../lobby/PlayerRow";
 import { HostControls } from "../../lobby/HostControls";
 import { GameScreen } from "../../game/GameScreen";
 import { EndScreen } from "../../game/EndScreen";
+import { StartCountdown } from "../../game/StartCountdown";
 import { getPlayerSession } from "../../lib/storage";
 import { Colors, Fonts, Spacing, Sticker } from "../../constants/colors";
 
@@ -27,6 +28,27 @@ export default function LobbyScreen() {
 
   const { game, players, amIHost, amIInLobby, isLoading } = useLobbyState(code, playerName);
   const { leaveLobby, removePlayer, startGame, isLoading: actionLoading, error } = useLobby();
+
+  const [copied, setCopied] = useState(false);
+
+  // Start-of-game countdown: play it only when we actually witnessed the game
+  // begin (joinable → started), so a mid-game refresh jumps straight in.
+  const [introDone, setIntroDone] = useState(false);
+  const sawJoinable = useRef(false);
+  useEffect(() => {
+    if (game?.phase === "joinable") sawJoinable.current = true;
+  }, [game?.phase]);
+
+  const handleCopyCode = async () => {
+    if (!game?.gameCode) return;
+    try {
+      await navigator.clipboard.writeText(game.gameCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard unavailable (e.g. insecure context) — silently no-op
+    }
+  };
 
   // If there's no session, this page shouldn't be accessible — redirect home
   useEffect(() => {
@@ -55,6 +77,9 @@ export default function LobbyScreen() {
   // The same route renders the right phase — everyone is subscribed, so start
   // and end transitions happen for all players at once with no navigation.
   if (game.phase === "started") {
+    if (sawJoinable.current && !introDone) {
+      return <StartCountdown onDone={() => setIntroDone(true)} />;
+    }
     return <GameScreen players={players} playerName={playerName} />;
   }
   if (game.phase === "ended") {
@@ -67,7 +92,17 @@ export default function LobbyScreen() {
       {/* ── Header ── */}
       <View style={styles.header}>
         <Text style={styles.codeLabel}>Room Code</Text>
-        <Text style={styles.code}>{game.gameCode}</Text>
+        <View style={styles.codeRow}>
+          <Text style={styles.code}>{game.gameCode}</Text>
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={handleCopyCode}
+            activeOpacity={0.8}
+            accessibilityLabel="Copy room code"
+          >
+            <Text style={styles.copyButtonText}>{copied ? "✓" : "Copy"}</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={styles.playerCount}>
           {players.length} {players.length === 1 ? "player" : "players"} waiting
         </Text>
@@ -142,6 +177,11 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 2,
   },
+  codeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
   code: {
     fontFamily: Fonts.stamp,
     fontSize: 48,
@@ -151,6 +191,21 @@ const styles = StyleSheet.create({
     textShadowColor: Colors.ink900,
     textShadowOffset: { width: 3, height: 3 },
     textShadowRadius: 0,
+  },
+  copyButton: {
+    borderWidth: Sticker.borderWidth,
+    borderColor: Sticker.borderColor,
+    borderRadius: 999,
+    paddingVertical: Spacing.xs + 2,
+    paddingHorizontal: Spacing.sm + 2,
+    backgroundColor: Colors.bgElevated,
+  },
+  copyButtonText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 13,
+    color: Colors.gold500,
+    minWidth: 34,
+    textAlign: "center",
   },
   playerCount: {
     fontFamily: Fonts.body,
