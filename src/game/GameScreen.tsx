@@ -71,6 +71,7 @@ export function GameScreen({ players, playerName }: Props) {
                 <TargetReveal
                   names={players.map((p) => p.name)}
                   finalName={targetName}
+                  playerId={playerId}
                 />
               ) : (
                 <>

@@ -25,3 +25,26 @@ export function setPlayerSession(session: PlayerSession): void {
 export function clearPlayerSession(): void {
   localStorage.removeItem(KEY);
 }
+
+// Remembers the last target name the slot-machine reveal already played for a
+// given player, so a page refresh doesn't replay the animation. The reveal only
+// spins when the stored value differs from the current target — i.e. on first
+// assignment or when the target is reassigned (your target got killed).
+
+const REVEAL_KEY = "handit_revealed_target";
+
+export function getRevealedTarget(playerId: string): string | null {
+  try {
+    return localStorage.getItem(`${REVEAL_KEY}:${playerId}`);
+  } catch {
+    return null;
+  }
+}
+
+export function setRevealedTarget(playerId: string, targetName: string): void {
+  try {
+    localStorage.setItem(`${REVEAL_KEY}:${playerId}`, targetName);
+  } catch {
+    // Storage unavailable — the reveal just replays next time, no harm.
+  }
+}
