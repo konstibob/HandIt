@@ -6,6 +6,8 @@ import {
   type QueryCtx,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+import { AnalyticsEvent } from "./analytics";
 
 // ─── Game codes ───────────────────────────────────────────────────────────────
 
@@ -188,7 +190,18 @@ async function transferHostAway(ctx: MutationCtx, leaver: Doc<"players">) {
   const roster = await playersInGame(ctx, leaver.gameId);
   const others = roster.filter((p) => p._id !== leaver._id);
   if (others.length === 0) {
+    const game = await ctx.db.get(leaver.gameId);
     await ctx.db.patch(leaver.gameId, { phase: "ended" });
+    // A lobby that empties while still "joinable" never became a real game —
+    // count it as cancelled. (A "started" lobby emptying is a game ending,
+    // which is tracked separately in eliminate().)
+    if (game?.phase === "joinable") {
+      await ctx.scheduler.runAfter(0, internal.analytics.capture, {
+        event: AnalyticsEvent.gameCancelled,
+        distinctId: game.gameCode,
+        properties: { game_code: game.gameCode },
+      });
+    }
     return;
   }
   if (others.some((p) => p.isHost)) return; // someone else is already host
@@ -239,9 +252,28 @@ async function eliminate(
       (a, b) =>
         (b.kills ?? 0) - (a.kills ?? 0) || a._creationTime - b._creationTime
     );
+    const endedAt = Date.now();
     await ctx.db.patch(game._id, {
       phase: "ended",
       winnerId: finalists[0]?._id,
+      endedAt,
+    });
+
+    // Raw atoms for analytics — averages/totals are derived in PostHog. Re-read
+    // the roster so kill counts reflect the just-applied patches.
+    const finalRoster = await playersInGame(ctx, game._id);
+    await ctx.scheduler.runAfter(0, internal.analytics.capture, {
+      event: AnalyticsEvent.gameEnded,
+      distinctId: game.gameCode,
+      properties: {
+        game_code: game.gameCode,
+        player_count: finalRoster.length,
+        total_kills: finalRoster.reduce((sum, p) => sum + (p.kills ?? 0), 0),
+        // null if startedAt was somehow never set; PostHog handles null fine.
+        duration_seconds: game.startedAt
+          ? Math.round((endedAt - game.startedAt) / 1000)
+          : null,
+      },
     });
   }
 }
@@ -348,6 +380,15 @@ export const removePlayer = mutation({
     if (target._id === caller._id) throw new ConvexError("You can't remove yourself.");
 
     await ctx.db.delete(target._id);
+
+    const game = await ctx.db.get(caller.gameId);
+    if (game) {
+      await ctx.scheduler.runAfter(0, internal.analytics.capture, {
+        event: AnalyticsEvent.playerKicked,
+        distinctId: game.gameCode,
+        properties: { game_code: game.gameCode },
+      });
+    }
   },
 });
 
@@ -390,7 +431,17 @@ export const startGame = mutation({
       });
     }
 
-    await ctx.db.patch(game._id, { phase: "started", winnerId: undefined });
+    await ctx.db.patch(game._id, {
+      phase: "started",
+      winnerId: undefined,
+      startedAt: Date.now(),
+    });
+
+    await ctx.scheduler.runAfter(0, internal.analytics.capture, {
+      event: AnalyticsEvent.gameStarted,
+      distinctId: game.gameCode,
+      properties: { game_code: game.gameCode, player_count: players.length },
+    });
     return null;
   },
 });

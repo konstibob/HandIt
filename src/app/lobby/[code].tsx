@@ -16,6 +16,7 @@ import { HostControls } from "../../lobby/HostControls";
 import { GameScreen } from "../../game/GameScreen";
 import { EndScreen } from "../../game/EndScreen";
 import { StartCountdown } from "../../game/StartCountdown";
+import { CopyIcon } from "../../components/ui/CopyIcon";
 import { getPlayerSession } from "../../lib/storage";
 import { Colors, Fonts, Spacing, Sticker } from "../../constants/colors";
 
@@ -100,7 +101,11 @@ export default function LobbyScreen() {
             activeOpacity={0.8}
             accessibilityLabel="Copy room code"
           >
-            <Text style={styles.copyButtonText}>{copied ? "✓" : "Copy"}</Text>
+            {copied ? (
+              <Text style={styles.copyCheck}>✓</Text>
+            ) : (
+              <CopyIcon color={Colors.gold500} size={18} />
+            )}
           </TouchableOpacity>
         </View>
         <Text style={styles.playerCount}>
@@ -193,19 +198,19 @@ const styles = StyleSheet.create({
     textShadowRadius: 0,
   },
   copyButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     borderWidth: Sticker.borderWidth,
     borderColor: Sticker.borderColor,
-    borderRadius: 999,
-    paddingVertical: Spacing.xs + 2,
-    paddingHorizontal: Spacing.sm + 2,
     backgroundColor: Colors.bgElevated,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  copyButtonText: {
+  copyCheck: {
     fontFamily: Fonts.bodyBold,
-    fontSize: 13,
-    color: Colors.gold500,
-    minWidth: 34,
-    textAlign: "center",
+    fontSize: 18,
+    color: Colors.alive,
   },
   playerCount: {
     fontFamily: Fonts.body,
