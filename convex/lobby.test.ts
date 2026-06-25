@@ -490,6 +490,30 @@ describe("getResults", () => {
     }
   });
 
+  test("leaving after the game ended keeps the record so standings stay frozen", async () => {
+    const { gameId, gameCode, players } = await makeGame(t, ["A", "B", "C"]);
+    await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });
+
+    const roster = await readPlayers(t, gameId);
+    await t.mutation(api.lobby.confirmKilled, { playerId: roster[0]._id });
+
+    const game = await readGame(t, gameId);
+    expect(game?.phase).toBe("ended");
+
+    const before = await t.query(api.lobby.getResults, { gameCode });
+    expect(before!.players).toHaveLength(3);
+
+    // Everyone heads back home from the end screen.
+    for (const p of players) {
+      await t.mutation(api.lobby.leaveLobby, { playerId: p.playerId });
+    }
+
+    // Rows are untouched and the standings every viewer sees are unchanged.
+    expect(await readPlayers(t, gameId)).toHaveLength(3);
+    const after = await t.query(api.lobby.getResults, { gameCode });
+    expect(after).toEqual(before);
+  });
+
   test("a kill tie yields co-winners", async () => {
     const { gameId, gameCode, players } = await makeGame(t, ["A", "B", "C", "D"]);
     await t.mutation(api.lobby.startGame, { callerPlayerId: players[0].playerId });

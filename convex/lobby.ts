@@ -398,6 +398,13 @@ export const leaveLobby = mutation({
       return null;
     }
 
+    // Post-game departure: leaving the end screen is navigation-only. The final
+    // leaderboard, kill feed, and ring graph are all computed live from the
+    // player rows (getResults / getKillFeed / getHuntCircle), so deleting a row
+    // here would erase that player from EVERYONE else's still-open results
+    // screen. Keep the record so the final stats stay frozen for all viewers.
+    if (game?.phase === "ended") return null;
+
     // Pre-game (or already-eliminated) leave: remove from the lobby entirely.
     await ctx.db.delete(playerId);
     if (player.isHost) await transferHostAway(ctx, player);
