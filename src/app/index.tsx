@@ -133,7 +133,11 @@ export default function HomeScreen() {
               If you hand them any item and they accept it 
               <Text style={styles.howEm}> they are eliminated</Text>.
             </HowStep>
-            <HowStep n={3} last>
+            <HowStep n={3}>
+              You get a new target and  
+              <Text style={styles.howEm}> the hunt continues</Text>.
+            </HowStep>
+            <HowStep n={4} last>
               The Player with the most eliminiatinations:
               <Text style={styles.howEm}> Wins the game</Text>
             </HowStep>
