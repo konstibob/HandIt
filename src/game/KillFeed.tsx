@@ -1,6 +1,6 @@
 import { StyleSheet, Text, View } from "react-native";
 import { KillFeedCard } from "./KillFeedCard";
-import { relativeTime } from "../lib/time";
+import { timeIntoGame } from "../lib/time";
 import { Colors, Fonts, Spacing } from "../constants/colors";
 
 // Shape returned by the getKillFeed query (newest first).
@@ -12,9 +12,10 @@ export type KillFeedEntry = {
 
 type Props = {
   entries: KillFeedEntry[] | undefined;
+  startedAt: number | null | undefined;
 };
 
-export function KillFeed({ entries }: Props) {
+export function KillFeed({ entries, startedAt }: Props) {
   if (!entries || entries.length === 0) {
     return (
       <Text style={styles.empty}>No handoffs yet. The hunt is fresh.</Text>
@@ -28,7 +29,7 @@ export function KillFeed({ entries }: Props) {
           key={`${e.victimName}-${e.eliminatedAt}`}
           killerName={e.killerName}
           victimName={e.victimName}
-          time={relativeTime(e.eliminatedAt)}
+          time={timeIntoGame(e.eliminatedAt, startedAt)}
           fresh={i === 0}
         />
       ))}

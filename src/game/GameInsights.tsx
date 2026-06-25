@@ -11,14 +11,15 @@ import type { PublicPlayer } from "../lobby/lobbyHelpers";
 type Props = {
   players: PublicPlayer[];
   feed: KillFeedEntry[] | undefined;
+  startedAt: number | null | undefined;
   playerName: string | null;
 };
 
-export function GameInsights({ players, feed, playerName }: Props) {
+export function GameInsights({ players, feed, startedAt, playerName }: Props) {
   return (
     <View style={styles.wrap}>
       <Section title="Kill feed">
-        <KillFeed entries={feed} />
+        <KillFeed entries={feed} startedAt={startedAt} />
       </Section>
       <Section title="Players">
         <PlayersList players={players} playerName={playerName} />

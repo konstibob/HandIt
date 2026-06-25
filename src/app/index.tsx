@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -29,6 +29,15 @@ export default function HomeScreen() {
   function switchMode(next: Mode) {
     setMode(next);
     clearError();
+  }
+
+  // Drop a stale error (e.g. "name already taken") the moment the player edits a
+  // field to fix it, so it doesn't linger while they retype.
+  function edit(setter: (v: string) => void) {
+    return (value: string) => {
+      if (error) clearError();
+      setter(value);
+    };
   }
 
   const aliasOk = name.trim().length >= 2;
@@ -62,8 +71,7 @@ export default function HomeScreen() {
         <Image source={LOGO} style={styles.logo} resizeMode="contain" />
 
         <Text style={styles.tagline}>
-          The social assassination party game. Find your target. Make the
-          handoff. Don't get caught.
+          The social assassination party game.
         </Text>
 
         {/* Segmented control — active mode is a solid red pill */}
@@ -87,7 +95,7 @@ export default function HomeScreen() {
             required
             placeholder="e.g. Backstabber Bob"
             value={name}
-            onChangeText={setName}
+            onChangeText={edit(setName)}
             maxLength={20}
             autoFocus
           />
@@ -98,7 +106,7 @@ export default function HomeScreen() {
               code
               placeholder="XKCD"
               value={code}
-              onChangeText={(t) => setCode(t.toUpperCase())}
+              onChangeText={edit((t) => setCode(t.toUpperCase()))}
               maxLength={6}
               autoCapitalize="characters"
             />
@@ -113,8 +121,51 @@ export default function HomeScreen() {
             loading={isLoading}
           />
         </View>
+
+        {/* How it works — a connected "hunt thread" timeline */}
+        <View style={styles.how}>
+          <Text style={styles.howLabel}>The Hunt</Text>
+          <View style={styles.howSteps}>
+            <HowStep n={1}>
+              Each Player gets a different <Text style={styles.howEm}>players name assigned</Text>.
+            </HowStep>
+            <HowStep n={2}>
+              If you hand them any item and they accept it 
+              <Text style={styles.howEm}> they are eliminated</Text>.
+            </HowStep>
+            <HowStep n={3} last>
+              The Player with the most eliminiatinations:
+              <Text style={styles.howEm}> Wins the game</Text>
+            </HowStep>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function HowStep({
+  n,
+  last,
+  children,
+}: {
+  n: number;
+  last?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <View style={styles.howStep}>
+      {/* Left rail: gold badge + the connecting "hunt thread" */}
+      <View style={styles.howRail}>
+        <View style={styles.howBadge}>
+          <Text style={styles.howBadgeText}>{n}</Text>
+        </View>
+        {!last && <View style={styles.howThread} />}
+      </View>
+      <Text style={[styles.howText, !last && styles.howTextGap]}>
+        {children}
+      </Text>
+    </View>
   );
 }
 
@@ -213,5 +264,69 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body,
     fontSize: 14,
     color: Colors.red400,
+  },
+  how: {
+    width: "100%",
+    maxWidth: 300,
+    marginTop: Spacing.xl,
+    alignItems: "center",
+  },
+  howLabel: {
+    fontFamily: Fonts.stamp,
+    fontSize: 12,
+    letterSpacing: 2,
+    color: Colors.gold500,
+    textAlign: "center",
+    marginBottom: Spacing.md,
+  },
+  howSteps: {
+    alignSelf: "stretch",
+  },
+  howStep: {
+    flexDirection: "row",
+    alignItems: "stretch",
+  },
+  howRail: {
+    width: 28,
+    alignItems: "center",
+    marginRight: Spacing.sm + 2,
+  },
+  howBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.gold500,
+    borderWidth: 2,
+    borderColor: Colors.ink900,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  howBadgeText: {
+    fontFamily: Fonts.bodyBold,
+    fontSize: 14,
+    color: Colors.ink900,
+  },
+  // The vertical thread that links one kill to the next
+  howThread: {
+    width: 3,
+    flex: 1,
+    backgroundColor: Colors.gold600,
+    borderRadius: 2,
+    marginVertical: 4,
+  },
+  howText: {
+    flex: 1,
+    fontFamily: Fonts.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: Colors.textMuted,
+    paddingTop: 4,
+  },
+  howTextGap: {
+    paddingBottom: Spacing.md,
+  },
+  howEm: {
+    fontFamily: Fonts.bodyBold,
+    color: Colors.red300,
   },
 });

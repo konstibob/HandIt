@@ -25,7 +25,7 @@ export function KillFeedCard({ killerName, victimName, time, fresh = false }: Pr
       <View style={styles.body}>
         <Text style={styles.line} numberOfLines={2}>
           <Text style={styles.strong}>{killerName ?? "Someone"}</Text>
-          <Text style={styles.weapon}> handed it to </Text>
+          <Text style={styles.weapon}> eliminated </Text>
           <Text style={styles.victim}>{victimName}</Text>
         </Text>
         <Text style={styles.time}>{time}</Text>
@@ -68,7 +68,6 @@ const styles = StyleSheet.create({
   victim: {
     fontFamily: Fonts.bodyBold,
     color: Colors.textStrong,
-    textDecorationLine: "line-through",
     textDecorationColor: Colors.red500,
   },
   time: {

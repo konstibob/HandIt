@@ -5,8 +5,13 @@ import { Colors, Fonts, Radius } from "../constants/colors";
 
 // The assassination ring, drawn as a directed cycle (port of TargetGraph.jsx +
 // PlayerNode.jsx using react-native-svg). The living form the current cycle with
-// gold "weapon" arrows; eliminated players sit as faded, edgeless nodes. Only
-// dead players ever see this (it's a spoiler), gated server-side by getHuntCircle.
+// gold "weapon" arrows; eliminated players sit as faded, edgeless nodes.
+//
+// The hunt always flows one way — each living player hunts the next living
+// player clockwise — so every edge is a concentric clockwise ARC that hugs the
+// ring and rounds cleanly over any dead nodes in between. Passing a fixed
+// `order` keeps node positions stable across time (used by the history slider);
+// without it, the order is reconstructed from the current cycle.
 
 type CirclePlayer = { name: string; status: "alive" | "dead" };
 type Edge = { from: string; to: string };
@@ -14,64 +19,62 @@ type Edge = { from: string; to: string };
 type Props = {
   circle: { players: CirclePlayer[]; edges: Edge[] } | null | undefined;
   you: string | null;
+  // Fixed ring order (names) for a stable layout; defaults to the live cycle.
+  order?: string[];
   size?: number;
   nodeSize?: number;
 };
 
 const LABEL_W = 92;
+const TAU = Math.PI * 2;
 
-export function RingGraph({ circle, you, size = 300, nodeSize = 52 }: Props) {
+export function RingGraph({ circle, you, order, size = 300, nodeSize = 52 }: Props) {
   if (!circle || circle.players.length === 0) {
     return <Text style={styles.empty}>The ring isn't available yet.</Text>;
   }
 
-  const order = orderAroundCycle(circle.players, circle.edges);
-  const n = order.length;
-  const indexByName = new Map(order.map((p, i) => [p.name, i]));
+  const statusByName = new Map(circle.players.map((p) => [p.name, p.status]));
+  // Names in ring order: the caller's fixed order, or reconstructed from edges.
+  const names = order ?? orderAroundCycle(circle.players, circle.edges).map((p) => p.name);
+  const n = names.length;
+  const indexByName = new Map(names.map((name, i) => [name, i]));
 
   const cx = size / 2;
   const cy = size / 2;
   const nodeR = nodeSize / 2;
-  const R = size / 2 - nodeR - 30; // ring radius (leaves room for labels)
+  const R = size / 2 - nodeR - 34; // ring radius (leaves room for labels)
 
-  const pos = order.map((_, i) => {
-    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
-    return { x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) };
-  });
+  const angle = (i: number) => -Math.PI / 2 + (i * TAU) / n;
+  const pos = names.map((_, i) => ({
+    x: cx + R * Math.cos(angle(i)),
+    y: cy + R * Math.sin(angle(i)),
+  }));
 
-  // Build the curved arrows for the edges that still exist (living cycle).
+  // Angular gap so each arc starts/ends just outside its node, clamped so a
+  // single-step arc never inverts on itself.
+  const pad = Math.min((nodeR + 7) / R, (TAU / n) * 0.42);
+
   const arrows = circle.edges
     .map(({ from, to }) => {
       const fi = indexByName.get(from);
       const ti = indexByName.get(to);
       if (fi === undefined || ti === undefined || fi === ti) return null;
 
-      const f = pos[fi];
-      const t = pos[ti];
-      const dx = t.x - f.x;
-      const dy = t.y - f.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len;
-      const uy = dy / len;
+      const aF = angle(fi) + pad;
+      const aT = angle(ti) - pad;
+      const sweep = (((aT - aF) % TAU) + TAU) % TAU; // clockwise span
+      const sx = cx + R * Math.cos(aF);
+      const sy = cy + R * Math.sin(aF);
+      const ex = cx + R * Math.cos(aT);
+      const ey = cy + R * Math.sin(aT);
+      const large = sweep > Math.PI ? 1 : 0;
 
-      const sx = f.x + ux * (nodeR + 7);
-      const sy = f.y + uy * (nodeR + 7);
-      const ex = t.x - ux * (nodeR + 16);
-      const ey = t.y - uy * (nodeR + 16);
-
-      // Bow toward the center for a pleasing arc.
-      const mx = (sx + ex) / 2;
-      const my = (sy + ey) / 2;
-      const toCx = cx - mx;
-      const toCy = cy - my;
-      const tl = Math.hypot(toCx, toCy) || 1;
-      const bow = size * 0.07;
-      const qx = mx + (toCx / tl) * bow;
-      const qy = my + (toCy / tl) * bow;
-
+      // Arrowhead along the clockwise tangent at the arc's end (sweep flag 1).
+      const tx = -Math.sin(aT);
+      const ty = Math.cos(aT);
       return {
-        d: `M ${sx} ${sy} Q ${qx} ${qy} ${ex} ${ey}`,
-        head: arrowHead(ex, ey, qx, qy),
+        d: `M ${sx} ${sy} A ${R} ${R} 0 ${large} 1 ${ex} ${ey}`,
+        head: arrowHead(ex, ey, tx, ty),
       };
     })
     .filter((a): a is { d: string; head: string } => a !== null);
@@ -111,53 +114,50 @@ export function RingGraph({ circle, you, size = 300, nodeSize = 52 }: Props) {
         ))}
       </Svg>
 
-      {order.map((p, i) => (
-        <View
-          key={p.name}
-          style={[
-            styles.node,
-            { left: pos[i].x - LABEL_W / 2, top: pos[i].y - nodeR },
-          ]}
-        >
-          <Avatar name={p.name} state={p.status} size={nodeSize} />
+      {names.map((name, i) => {
+        const status = statusByName.get(name) ?? "dead";
+        return (
           <View
+            key={name}
             style={[
-              styles.labelPill,
-              p.name === you && styles.labelPillYou,
+              styles.node,
+              { left: pos[i].x - LABEL_W / 2, top: pos[i].y - nodeR },
             ]}
           >
-            <Text
-              style={[styles.label, p.status === "dead" && styles.labelDead]}
-              numberOfLines={1}
-            >
-              {p.name}
-            </Text>
+            <Avatar name={name} state={status} size={nodeSize} />
+            <View style={[styles.labelPill, name === you && styles.labelPillYou]}>
+              <Text
+                style={[styles.label, status === "dead" && styles.labelDead]}
+                numberOfLines={1}
+              >
+                {name}
+              </Text>
+            </View>
           </View>
-        </View>
-      ))}
+        );
+      })}
     </View>
   );
 }
 
 // Triangle points for an arrowhead whose tip is at (ex,ey), pointing along the
-// direction from the curve's control point (qx,qy) to the tip.
-function arrowHead(ex: number, ey: number, qx: number, qy: number): string {
-  const dx = ex - qx;
-  const dy = ey - qy;
-  const len = Math.hypot(dx, dy) || 1;
-  const ux = dx / len;
-  const uy = dy / len;
-  const size = 9;
-  const bx = ex - ux * size;
-  const by = ey - uy * size;
-  const px = -uy;
-  const py = ux;
-  const w = size * 0.6;
+// unit-ish direction (ux,uy).
+function arrowHead(ex: number, ey: number, ux: number, uy: number): string {
+  const len = Math.hypot(ux, uy) || 1;
+  const dx = ux / len;
+  const dy = uy / len;
+  const size = 11;
+  const bx = ex - dx * size;
+  const by = ey - dy * size;
+  const px = -dy;
+  const py = dx;
+  const w = size * 0.62;
   return `${ex},${ey} ${bx + px * w},${by + py * w} ${bx - px * w},${by - py * w}`;
 }
 
 // Reconstruct ring order by walking the edge chain, then appending any players
-// not on the current cycle (the eliminated) so they still appear as nodes.
+// not on the current cycle (the eliminated) so they still appear as nodes. Only
+// used as a fallback when the caller doesn't supply a stable `order`.
 function orderAroundCycle(players: CirclePlayer[], edges: Edge[]): CirclePlayer[] {
   const byName = new Map(players.map((p) => [p.name, p]));
   const next = new Map(edges.map((e) => [e.from, e.to]));

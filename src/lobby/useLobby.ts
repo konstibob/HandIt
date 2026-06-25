@@ -4,6 +4,7 @@ import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { getPlayerSession, setPlayerSession, clearPlayerSession } from "../lib/storage";
+import { friendlyError } from "../lib/errors";
 
 // Wraps all lobby mutations with loading/error state and navigation.
 // Each action reads the player session from localStorage as the caller identity.
@@ -26,7 +27,7 @@ export function useLobby() {
     try {
       return await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong");
+      setError(friendlyError(e));
       return null;
     } finally {
       setIsLoading(false);

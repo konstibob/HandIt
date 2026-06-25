@@ -1,12 +1,12 @@
 import { ConvexError, v } from "convex/values";
+import { internal } from "./_generated/api";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
   mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
-import { internal } from "./_generated/api";
 import { AnalyticsEvent } from "./analytics";
 
 // ─── Game codes ───────────────────────────────────────────────────────────────
@@ -164,7 +164,7 @@ export const getKillFeed = query({
       .query("games")
       .withIndex("by_gameCode", (q) => q.eq("gameCode", gameCode))
       .unique();
-    if (!game) return { entries: [] };
+    if (!game) return { entries: [], startedAt: null };
 
     const roster = await playersInGame(ctx, game._id);
     const nameById = new Map(roster.map((p) => [p._id, p.name]));
@@ -178,7 +178,8 @@ export const getKillFeed = query({
         eliminatedAt: p.eliminatedAt as number,
       }));
 
-    return { entries };
+    // startedAt anchors the static "Xm in" timestamps shown in the feed/timeline.
+    return { entries, startedAt: game.startedAt ?? null };
   },
 });
 

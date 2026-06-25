@@ -1,19 +1,20 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "convex/react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { Avatar } from "../components/ui/Avatar";
-import { TargetReveal } from "./TargetReveal";
-import { GameInsights } from "./GameInsights";
-import { RingGraph } from "./RingGraph";
-import { StickerButton } from "../components/ui/StickerButton";
 import { SegmentControl, type SegmentOption } from "../components/ui/SegmentControl";
+import { StickerButton } from "../components/ui/StickerButton";
+import { Toast } from "../components/ui/Toast";
 import { Colors, Fonts, Radius, Spacing, Sticker } from "../constants/colors";
-import { useLobby } from "../lobby/useLobby";
 import { getPlayerSession } from "../lib/storage";
 import type { PublicPlayer } from "../lobby/lobbyHelpers";
-import type { Id } from "../../convex/_generated/dataModel";
+import { useLobby } from "../lobby/useLobby";
+import { GameInsights } from "./GameInsights";
+import { RingTimeline } from "./RingTimeline";
+import { TargetReveal } from "./TargetReveal";
 
 type Props = {
   players: PublicPlayer[];
@@ -49,6 +50,21 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
   );
   const targetName = targetResult?.targetName ?? null;
 
+  // "You have a new target!" toast. Your target only changes when you eliminate
+  // it (you inherit their target), so a target swap mid-session means a kill.
+  // We track the previous name and fire the toast on a name→different-name
+  // change — never on the first assignment (null→name) or a refresh (the ref
+  // resets to null, so the freshly-loaded target reads as the first value).
+  const [showNewTarget, setShowNewTarget] = useState(false);
+  const prevTargetRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevTargetRef.current;
+    if (targetName && prev && targetName !== prev) {
+      setShowNewTarget(true);
+    }
+    if (targetName) prevTargetRef.current = targetName;
+  }, [targetName]);
+
   // Kill feed is public; the ring is spoiler-gated server-side (null unless dead).
   const feed = useQuery(api.lobby.getKillFeed, { gameCode });
   const huntCircle = useQuery(
@@ -68,6 +84,12 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {showNewTarget && (
+        <Toast
+          message="You have a new target!"
+          onHide={() => setShowNewTarget(false)}
+        />
+      )}
       <ScrollView contentContainerStyle={styles.scroll}>
         {/* Stats row — always visible */}
         <View style={styles.statsRow}>
@@ -108,14 +130,13 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
                 </>
               )}
               <Text style={styles.copy}>
-                Slip them the card without anyone watching. They confirm the
-                handoff on their own phone.
+                Give them an Item. If they accept it, they're out.
               </Text>
             </View>
 
             {/* Victim self-report — the important mechanic */}
             <View style={[styles.card, styles.cardFlat]}>
-              <Text style={styles.handedTitle}>Got handed the card?</Text>
+              <Text style={styles.handedTitle}>Got handed an Item by your Killer?</Text>
               <Text style={styles.copySmall}>
                 If someone slipped you the card, you're out — mark it so your
                 hunter gets the credit.
@@ -141,7 +162,7 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
             <View style={[styles.card, styles.cardFlat, styles.warnCard]}>
               <Text style={styles.warnText}>
                 <Text style={styles.warnStrong}>Someone is hunting you too. </Text>
-                Trust no handshake.
+                Trust noone.
               </Text>
             </View>
           </>
@@ -152,13 +173,19 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
           <GameInsights
             players={players}
             feed={feed?.entries}
+            startedAt={feed?.startedAt}
             playerName={playerName}
           />
         )}
 
         {/* ── Ring tab (dead only): the spoiler graph ── */}
         {tab === "ring" && dead && (
-          <RingGraph circle={huntCircle} you={playerName} />
+          <RingTimeline
+            circle={huntCircle}
+            feed={feed?.entries}
+            startedAt={feed?.startedAt}
+            you={playerName}
+          />
         )}
 
         <TouchableOpacity

@@ -12,6 +12,17 @@ export function relativeTime(timestamp: number, now: number = Date.now()): strin
   return `${days} day${days > 1 ? "s" : ""} ago`;
 }
 
+// A static "time into the game" label for events ("45s in", "8m 30s in"),
+// measured from when the game started. Unlike relativeTime it never changes,
+// so the kill feed / ring timeline don't have to tick every second.
+export function timeIntoGame(
+  timestamp: number,
+  startedAt: number | null | undefined
+): string {
+  if (startedAt == null) return "";
+  return `${formatDuration((timestamp - startedAt) / 1000)} in`;
+}
+
 // A compact label for a span of seconds ("45s", "8m 30s", "1h 2m"). Used by the
 // end-of-game leaderboard to show how long each player survived.
 export function formatDuration(seconds: number): string {

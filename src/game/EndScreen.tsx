@@ -5,7 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Leaderboard } from "./Leaderboard";
 import { KillFeed } from "./KillFeed";
-import { RingGraph } from "./RingGraph";
+import { RingTimeline } from "./RingTimeline";
 import { StickerButton } from "../components/ui/StickerButton";
 import {
   SegmentControl,
@@ -69,9 +69,18 @@ export function EndScreen({ playerName, gameCode }: Props) {
             <Text style={styles.loading}>Tallying the handoffs…</Text>
           ))}
 
-        {tab === "feed" && <KillFeed entries={feed?.entries} />}
+        {tab === "feed" && (
+          <KillFeed entries={feed?.entries} startedAt={feed?.startedAt} />
+        )}
 
-        {tab === "ring" && <RingGraph circle={huntCircle} you={playerName} />}
+        {tab === "ring" && (
+          <RingTimeline
+            circle={huntCircle}
+            feed={feed?.entries}
+            startedAt={feed?.startedAt}
+            you={playerName}
+          />
+        )}
 
         <StickerButton
           label="Back to home"
