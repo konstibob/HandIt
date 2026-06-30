@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { ScrollView, StyleSheet, Text } from "react-native";
+import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Leaderboard } from "./Leaderboard";
 import { KillFeed } from "./KillFeed";
 import { RingTimeline } from "./RingTimeline";
+import { BackButton } from "../components/ui/BackButton";
 import { StickerButton } from "../components/ui/StickerButton";
 import {
   SegmentControl,
@@ -13,11 +14,11 @@ import {
 } from "../components/ui/SegmentControl";
 import { Colors, Fonts, Spacing } from "../constants/colors";
 import { useLobby } from "../lobby/useLobby";
-import { getPlayerSession } from "../lib/storage";
 import type { Id } from "../../convex/_generated/dataModel";
 
 type Props = {
   playerName: string | null;
+  playerId: Id<"players"> | null;
   gameCode: string;
 };
 
@@ -27,12 +28,9 @@ type Tab = "results" | "feed" | "ring";
 // leaderboard crown the player with the most kills overall (ties = co-winners);
 // surviving to the final two carries no special weight. The kill feed and the
 // (now-public) ring graph stay browsable, and anyone can head back home.
-export function EndScreen({ playerName, gameCode }: Props) {
+export function EndScreen({ playerName, playerId, gameCode }: Props) {
   const { leaveLobby, isLoading } = useLobby();
   const [tab, setTab] = useState<Tab>("results");
-
-  const session = getPlayerSession();
-  const playerId = (session?.playerId ?? null) as Id<"players"> | null;
 
   const results = useQuery(api.lobby.getResults, { gameCode });
   const feed = useQuery(api.lobby.getKillFeed, { gameCode });
@@ -51,6 +49,10 @@ export function EndScreen({ playerName, gameCode }: Props) {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.topBar}>
+          <BackButton />
+        </View>
+
         <Text style={styles.kicker}>Game over</Text>
         <Text style={styles.headline}>
           {winnerLine(results?.winnerNames, results?.players)}
@@ -85,7 +87,7 @@ export function EndScreen({ playerName, gameCode }: Props) {
         <StickerButton
           label="Back to home"
           variant="secondary"
-          onPress={leaveLobby}
+          onPress={() => playerId && leaveLobby(playerId)}
           loading={isLoading}
         />
       </ScrollView>
@@ -117,6 +119,7 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     flexGrow: 1,
   },
+  topBar: { alignSelf: "stretch" },
   kicker: {
     fontFamily: Fonts.stamp,
     fontSize: 13,

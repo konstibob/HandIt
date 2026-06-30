@@ -5,11 +5,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Avatar } from "../components/ui/Avatar";
+import { BackButton } from "../components/ui/BackButton";
 import { SegmentControl, type SegmentOption } from "../components/ui/SegmentControl";
 import { StickerButton } from "../components/ui/StickerButton";
 import { Toast } from "../components/ui/Toast";
 import { Colors, Fonts, Radius, Spacing, Sticker } from "../constants/colors";
-import { getPlayerSession } from "../lib/storage";
 import type { PublicPlayer } from "../lobby/lobbyHelpers";
 import { useLobby } from "../lobby/useLobby";
 import { GameInsights } from "./GameInsights";
@@ -19,7 +19,9 @@ import { TargetReveal } from "./TargetReveal";
 type Props = {
   players: PublicPlayer[];
   playerName: string | null;
+  playerId: Id<"players"> | null;
   gameCode: string;
+  roomName: string | null;
 };
 
 type Tab = "target" | "game" | "ring";
@@ -31,13 +33,10 @@ type Tab = "target" | "game" | "ring";
 //
 // The secret target is NOT in the public roster — it's fetched via myTarget,
 // keyed by the caller's own (private) player id, so no one else can read it.
-export function GameScreen({ players, playerName, gameCode }: Props) {
+export function GameScreen({ players, playerName, playerId, gameCode, roomName }: Props) {
   const { confirmKilled, leaveLobby, isLoading } = useLobby();
   const [armed, setArmed] = useState(false);
   const [tab, setTab] = useState<Tab>("target");
-
-  const session = getPlayerSession();
-  const playerId = (session?.playerId ?? null) as Id<"players"> | null;
 
   const me = players.find((p) => p.name === playerName) ?? null;
   const aliveCount = players.filter((p) => p.status === "alive").length;
@@ -91,6 +90,15 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
         />
       )}
       <ScrollView contentContainerStyle={styles.scroll}>
+        <View style={styles.topBar}>
+          <BackButton />
+        </View>
+
+        {/* Room name — centered, identifies which of your games this is */}
+        <Text style={styles.roomName} numberOfLines={1}>
+          {roomName?.trim() || gameCode}
+        </Text>
+
         {/* Stats row — always visible */}
         <View style={styles.statsRow}>
           <StatCard value={aliveCount} label="Still alive" color={Colors.alive} />
@@ -101,7 +109,7 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
           <View style={styles.outBanner}>
             <Text style={styles.outBannerTitle}>You're out</Text>
             <Text style={styles.outBannerCopy}>
-              You got handed it. Sit tight and watch how the ring closes.
+              You got eliminated
             </Text>
           </View>
         )}
@@ -147,7 +155,7 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
                     setArmed(true);
                     return;
                   }
-                  confirmKilled();
+                  if (playerId) confirmKilled(playerId);
                 }}
                 loading={isLoading}
               />
@@ -189,7 +197,7 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
 
         <TouchableOpacity
           style={styles.leaveButton}
-          onPress={leaveLobby}
+          onPress={() => playerId && leaveLobby(playerId)}
           activeOpacity={0.8}
         >
           <Text style={styles.leaveText}>{dead ? "Leave game" : "Quit (you're out)"}</Text>
@@ -225,6 +233,14 @@ const styles = StyleSheet.create({
     width: "100%",
     alignSelf: "center",
     flexGrow: 1,
+  },
+  topBar: { alignSelf: "stretch" },
+  roomName: {
+    fontFamily: Fonts.display,
+    fontSize: 22,
+    color: Colors.textStrong,
+    textAlign: "center",
+    alignSelf: "stretch",
   },
   statsRow: { flexDirection: "row", gap: Spacing.sm },
 

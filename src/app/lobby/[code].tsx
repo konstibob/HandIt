@@ -11,34 +11,48 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useLobbyState } from "../../lobby/useLobbyState";
 import { useLobby } from "../../lobby/useLobby";
+import { useMyGames } from "../../lobby/useMyGames";
 import { PlayerRow } from "../../lobby/PlayerRow";
 import { HostControls } from "../../lobby/HostControls";
 import { GameScreen } from "../../game/GameScreen";
 import { EndScreen } from "../../game/EndScreen";
 import { StartCountdown } from "../../game/StartCountdown";
 import { CopyIcon } from "../../components/ui/CopyIcon";
-import { getPlayerSession } from "../../lib/storage";
+import { BackButton } from "../../components/ui/BackButton";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { Colors, Fonts, Spacing, Sticker } from "../../constants/colors";
 
 export default function LobbyScreen() {
   const { code } = useLocalSearchParams<{ code: string }>();
   const router = useRouter();
 
-  const session = getPlayerSession();
-  const playerName = session?.playerName ?? null;
+  // Identity is scoped to THIS lobby: find my player row for this game code
+  // among all the games I'm in. null once loaded means I'm not in this one.
+  const { findGame, isLoading: identityLoading } = useMyGames();
+  const me = findGame(code);
+  const playerName = me?.playerName ?? null;
+  const playerId = (me?.playerId ?? null) as Id<"players"> | null;
 
   const { game, players, amIHost, amIInLobby, isLoading } = useLobbyState(code, playerName);
   const { leaveLobby, removePlayer, startGame, isLoading: actionLoading, error } = useLobby();
 
   const [copied, setCopied] = useState(false);
 
-  // Start-of-game countdown: play it only when we actually witnessed the game
-  // begin (joinable → started), so a mid-game refresh jumps straight in.
+  // Start-of-game countdown: play it when the game has only just begun, so a
+  // mid-game refresh (or re-entering a long-running game from the lobbies list)
+  // jumps straight in instead of replaying the 3·2·1. We use two signals so the
+  // animation survives a re-mount around the start moment: either we witnessed
+  // the joinable → started flip ourselves, OR the game's startedAt is very
+  // recent.
   const [introDone, setIntroDone] = useState(false);
   const sawJoinable = useRef(false);
   useEffect(() => {
     if (game?.phase === "joinable") sawJoinable.current = true;
   }, [game?.phase]);
+
+  const JUST_STARTED_MS = 8000;
+  const justStarted =
+    game?.startedAt != null && Date.now() - game.startedAt < JUST_STARTED_MS;
 
   const handleCopyCode = async () => {
     if (!game?.gameCode) return;
@@ -51,12 +65,14 @@ export default function LobbyScreen() {
     }
   };
 
-  // If there's no session, this page shouldn't be accessible — redirect home
+  // If I'm not in this lobby (once identity has loaded), redirect home. The
+  // loading guard avoids a flash-redirect right after joining, before myGames
+  // has caught up.
   useEffect(() => {
-    if (!session) router.replace("/");
-  }, []);
+    if (!identityLoading && !me) router.replace("/");
+  }, [identityLoading, me, router]);
 
-  if (isLoading) {
+  if (isLoading || identityLoading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator color={Colors.red500} size="large" />
@@ -78,20 +94,44 @@ export default function LobbyScreen() {
   // The same route renders the right phase — everyone is subscribed, so start
   // and end transitions happen for all players at once with no navigation.
   if (game.phase === "started") {
-    if (sawJoinable.current && !introDone) {
+    if ((sawJoinable.current || justStarted) && !introDone) {
       return <StartCountdown onDone={() => setIntroDone(true)} />;
     }
-    return <GameScreen players={players} playerName={playerName} gameCode={game.gameCode} />;
+    return (
+      <GameScreen
+        players={players}
+        playerName={playerName}
+        playerId={playerId}
+        gameCode={game.gameCode}
+        roomName={game.roomName}
+      />
+    );
   }
   if (game.phase === "ended") {
-    return <EndScreen playerName={playerName} gameCode={game.gameCode} />;
+    return (
+      <EndScreen
+        playerName={playerName}
+        playerId={playerId}
+        gameCode={game.gameCode}
+      />
+    );
   }
 
   return (
     <SafeAreaView style={styles.safe}>
 
+      {/* ── Back to your lobbies (non-destructive) ── */}
+      <View style={styles.topBar}>
+        <BackButton />
+      </View>
+
       {/* ── Header ── */}
       <View style={styles.header}>
+        {game.roomName ? (
+          <Text style={styles.roomTitle} numberOfLines={1}>
+            {game.roomName}
+          </Text>
+        ) : null}
         <Text style={styles.codeLabel}>Room Code</Text>
         <View style={styles.codeRow}>
           <Text style={styles.code}>{game.gameCode}</Text>
@@ -123,7 +163,7 @@ export default function LobbyScreen() {
             player={item}
             isCurrentPlayer={item.name === playerName}
             viewerIsHost={amIHost}
-            onRemove={(name) => removePlayer(name)}
+            onRemove={(name) => playerId && removePlayer(playerId, name)}
           />
         )}
         ListEmptyComponent={
@@ -138,7 +178,7 @@ export default function LobbyScreen() {
       <View style={styles.footer}>
         {amIHost && (
           <HostControls
-            onStartGame={startGame}
+            onStartGame={() => playerId && startGame(playerId)}
             isLoading={actionLoading}
             playerCount={players.length}
           />
@@ -146,7 +186,7 @@ export default function LobbyScreen() {
 
         <TouchableOpacity
           style={styles.leaveButton}
-          onPress={leaveLobby}
+          onPress={() => playerId && leaveLobby(playerId)}
           activeOpacity={0.8}
         >
           <Text style={styles.leaveText}>Leave Lobby</Text>
@@ -169,11 +209,22 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: Spacing.md,
   },
+  topBar: {
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+  },
   header: {
     alignItems: "center",
-    paddingVertical: Spacing.xl,
+    paddingVertical: Spacing.lg,
     paddingHorizontal: Spacing.lg,
     gap: Spacing.xs,
+  },
+  roomTitle: {
+    fontFamily: Fonts.display,
+    fontSize: 24,
+    color: Colors.textStrong,
+    textAlign: "center",
+    marginBottom: Spacing.xs,
   },
   codeLabel: {
     fontFamily: Fonts.bodyBold,

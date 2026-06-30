@@ -3,11 +3,15 @@ import { useRouter } from "expo-router";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { getPlayerSession, setPlayerSession, clearPlayerSession } from "../lib/storage";
+import { getUserId } from "../lib/storage";
 import { friendlyError } from "../lib/errors";
 
 // Wraps all lobby mutations with loading/error state and navigation.
-// Each action reads the player session from localStorage as the caller identity.
+//
+// Identity is now game-scoped: a device can be in many lobbies at once, so the
+// per-game action functions take the relevant playerId explicitly (the caller
+// resolves it via useMyGames().findGame(code)). hostLobby/joinGame stamp every
+// new player row with this device's single userId token so myGames can find it.
 
 export function useLobby() {
   const router = useRouter();
@@ -34,54 +38,48 @@ export function useLobby() {
     }
   }
 
-  async function hostLobby(name: string) {
-    // The server allocates a guaranteed-unique code; we just send the name.
-    const result = await run(() => hostLobbyMutation({ name }));
+  async function hostLobby(name: string, roomName: string) {
+    // The server allocates a guaranteed-unique code; we send the alias + room
+    // name + our token.
+    const result = await run(() =>
+      hostLobbyMutation({ name, roomName, userId: getUserId() })
+    );
     if (!result) return;
-    setPlayerSession({ playerId: result.playerId, gameCode: result.gameCode, playerName: name });
     router.push(`/lobby/${result.gameCode}`);
   }
 
   async function joinGame(code: string, name: string) {
     const result = await run(() =>
-      joinGameMutation({ gameCode: code.toUpperCase().trim(), name })
+      joinGameMutation({
+        gameCode: code.toUpperCase().trim(),
+        name,
+        userId: getUserId(),
+      })
     );
     if (!result) return;
-    setPlayerSession({ playerId: result.playerId, gameCode: result.gameCode, playerName: name });
     router.push(`/lobby/${result.gameCode}`);
   }
 
-  async function leaveLobby() {
-    const session = getPlayerSession();
-    if (!session) return;
-    await run(() => leaveLobbyMutation({ playerId: session.playerId as Id<"players"> }));
-    clearPlayerSession();
+  // Leave a specific lobby (mid-game = counts as elimination; pre-game = removed;
+  // post-game = navigation only — all handled server-side). Returns to the home
+  // screen, which now shows the rest of your lobbies.
+  async function leaveLobby(playerId: Id<"players">) {
+    await run(() => leaveLobbyMutation({ playerId }));
     router.replace("/");
   }
 
-  async function removePlayer(targetName: string) {
-    const session = getPlayerSession();
-    if (!session) return;
-    await run(() =>
-      removePlayerMutation({
-        callerPlayerId: session.playerId as Id<"players">,
-        targetName,
-      })
-    );
+  async function removePlayer(callerPlayerId: Id<"players">, targetName: string) {
+    await run(() => removePlayerMutation({ callerPlayerId, targetName }));
   }
 
-  async function startGame() {
-    const session = getPlayerSession();
-    if (!session) return;
+  async function startGame(callerPlayerId: Id<"players">) {
     // No navigation needed — the lobby screen swaps to the game view when the
     // subscribed game.phase flips to "started".
-    await run(() => startGameMutation({ callerPlayerId: session.playerId as Id<"players"> }));
+    await run(() => startGameMutation({ callerPlayerId }));
   }
 
-  async function confirmKilled() {
-    const session = getPlayerSession();
-    if (!session) return;
-    await run(() => confirmKilledMutation({ playerId: session.playerId as Id<"players"> }));
+  async function confirmKilled(playerId: Id<"players">) {
+    await run(() => confirmKilledMutation({ playerId }));
   }
 
   return {

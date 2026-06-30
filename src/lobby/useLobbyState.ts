@@ -2,7 +2,6 @@ import { useEffect, useRef } from "react";
 import { useQuery } from "convex/react";
 import { useRouter } from "expo-router";
 import { api } from "../../convex/_generated/api";
-import { clearPlayerSession } from "../lib/storage";
 import { isPlayerHost, isPlayer } from "./lobbyHelpers";
 import type { PublicGame, PublicPlayer } from "./lobbyHelpers";
 
@@ -38,7 +37,8 @@ export function useLobbyState(gameCode: string, playerName: string | null) {
       game.phase !== "ended";
 
     if (kicked) {
-      clearPlayerSession();
+      // The host removed us — our player row is gone, so myGames already drops
+      // this lobby from the list. Nothing to clear; just head home.
       router.replace("/");
     }
   }, [isLoading, amIInLobby, game, router]);

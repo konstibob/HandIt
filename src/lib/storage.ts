@@ -1,29 +1,76 @@
 // Persists the player's identity across page refreshes.
 // Web-only (localStorage). If targeting native later, swap for AsyncStorage.
 
-export type PlayerSession = {
-  playerId: string;
-  gameCode: string;
-  playerName: string;
-};
+// ─── User identity token ────────────────────────────────────────────────────
+//
+// A single, stable, random token that identifies THIS device/user — not a token
+// per lobby. Every player row we create server-side is stamped with it, so the
+// `myGames` query can list every lobby this user is in from this one value. This
+// replaces the old per-game `handit_session`.
 
-const KEY = "handit_session";
+const USER_KEY = "handit_user_id";
 
-export function getPlayerSession(): PlayerSession | null {
+function randomToken(): string {
   try {
-    const raw = localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as PlayerSession) : null;
+    if (typeof crypto !== "undefined" && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // fall through to the manual generator below
+  }
+  // Fallback for environments without crypto.randomUUID.
+  return `u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+// Returns the user token, lazily creating and persisting one on first call.
+export function getUserId(): string {
+  try {
+    const existing = localStorage.getItem(USER_KEY);
+    if (existing) return existing;
+    const fresh = randomToken();
+    localStorage.setItem(USER_KEY, fresh);
+    return fresh;
+  } catch {
+    // localStorage unavailable — return an ephemeral token so the app still
+    // works for this page load (it just won't persist across refreshes).
+    return randomToken();
+  }
+}
+
+export function clearUserId(): void {
+  try {
+    localStorage.removeItem(USER_KEY);
+  } catch {
+    // nothing to do
+  }
+}
+
+// ─── Legacy single-session migration ─────────────────────────────────────────
+//
+// Before multi-lobby, the only stored identity was one `handit_session` holding
+// a single { playerId, gameCode, playerName }. On first load after the upgrade
+// we read it once so we can adopt that in-progress game into the new userId
+// model (via the claimPlayer mutation), then drop the legacy key.
+
+const LEGACY_KEY = "handit_session";
+
+export function getLegacySession(): { playerId: string } | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { playerId?: string };
+    return parsed?.playerId ? { playerId: parsed.playerId } : null;
   } catch {
     return null;
   }
 }
 
-export function setPlayerSession(session: PlayerSession): void {
-  localStorage.setItem(KEY, JSON.stringify(session));
-}
-
-export function clearPlayerSession(): void {
-  localStorage.removeItem(KEY);
+export function clearLegacySession(): void {
+  try {
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // nothing to do
+  }
 }
 
 // Remembers the last target name the slot-machine reveal already played for a

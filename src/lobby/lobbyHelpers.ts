@@ -10,8 +10,10 @@ export type PublicPlayer = {
 
 export type PublicGame = {
   gameCode: string;
+  roomName: string | null;
   phase: "joinable" | "started" | "ended";
   winnerName: string | null;
+  startedAt: number | null;
 };
 
 // Pure helpers — no hooks, no side effects. Match by name since ids stay private.

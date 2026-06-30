@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -9,26 +9,56 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useMutation } from "convex/react";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { StickerButton } from "../components/ui/StickerButton";
 import { StickerInput } from "../components/ui/StickerInput";
 import { Colors, Control, Fonts, Radius, Spacing } from "../constants/colors";
+import { getUserId } from "../lib/storage";
+import { LobbyCard } from "../lobby/LobbyCard";
 import { useLobby } from "../lobby/useLobby";
+import { useMyGames } from "../lobby/useMyGames";
 import { useRejoin } from "../lobby/useRejoin";
 
 const LOGO = require("../../assets/images/hand-it-logo.png");
 
-type Mode = "join" | "create";
+type Mode = "join" | "create" | "lobbies";
 
 export default function HomeScreen() {
+  const router = useRouter();
+  // `view=lobbies` is set by the in-game back button: it means "show me my
+  // lobbies list" and tells useRejoin NOT to auto-jump back into the one game.
+  const { view } = useLocalSearchParams<{ view?: string }>();
+  const wantLobbies = view === "lobbies";
+
   const [mode, setMode] = useState<Mode>("join");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
+  const [roomName, setRoomName] = useState("");
   const { hostLobby, joinGame, isLoading, error, clearError } = useLobby();
-  const { isChecking } = useRejoin();
+  const { isChecking } = useRejoin(wantLobbies);
+  const { games, activeGames } = useMyGames();
+  const dismissGame = useMutation(api.lobby.dismissGame);
+
+  // Open the lobbies list automatically when (a) the back button asked for it,
+  // or (b) you land here already in 2+ games (rejoin keeps you home then) —
+  // unless you've since tapped a tab yourself.
+  const userPicked = useRef(false);
+  useEffect(() => {
+    if (userPicked.current) return;
+    if (wantLobbies || activeGames.length >= 2) setMode("lobbies");
+  }, [wantLobbies, activeGames.length]);
 
   function switchMode(next: Mode) {
+    userPicked.current = true;
     setMode(next);
     clearError();
+  }
+
+  function handleDismiss(playerId: string) {
+    dismissGame({ playerId: playerId as Id<"players">, userId: getUserId() });
   }
 
   // Drop a stale error (e.g. "name already taken") the moment the player edits a
@@ -42,14 +72,16 @@ export default function HomeScreen() {
 
   const aliasOk = name.trim().length >= 2;
   const codeOk = code.trim().length === 6;
-  const canSubmit = mode === "join" ? aliasOk && codeOk : aliasOk;
+  const roomNameOk = roomName.trim().length >= 2;
+  const canSubmit =
+    mode === "join" ? aliasOk && codeOk : aliasOk && roomNameOk;
 
   function handleSubmit() {
     if (!canSubmit || isLoading) return;
     if (mode === "join") {
       joinGame(code.trim(), name.trim());
     } else {
-      hostLobby(name.trim());
+      hostLobby(name.trim(), roomName.trim());
     }
   }
 
@@ -86,43 +118,82 @@ export default function HomeScreen() {
             active={mode === "create"}
             onPress={() => switchMode("create")}
           />
+          <SegmentButton
+            label={games.length > 0 ? `Lobbies (${games.length})` : "Lobbies"}
+            active={mode === "lobbies"}
+            onPress={() => switchMode("lobbies")}
+          />
         </View>
+
+        {/* Your lobbies — the list of every game you're currently in */}
+        {mode === "lobbies" && (
+          <View style={styles.form}>
+            {games.length === 0 ? (
+              <Text style={styles.emptyLobbies}>
+                You're not in any games yet. Create one or join with a code.
+              </Text>
+            ) : (
+              games.map((g) => (
+                <LobbyCard
+                  key={g.gameId}
+                  game={g}
+                  onPress={() => router.push(`/lobby/${g.gameCode}`)}
+                  onDismiss={() => handleDismiss(g.playerId)}
+                />
+              ))
+            )}
+          </View>
+        )}
 
         {/* Fields sit directly on the dark ground — no card wrapper */}
-        <View style={styles.form}>
-          <StickerInput
-            label="Your alias"
-            required
-            placeholder="e.g. Backstabber Bob"
-            value={name}
-            onChangeText={edit(setName)}
-            maxLength={20}
-            autoFocus
-          />
-
-          {mode === "join" && (
+        {mode !== "lobbies" && (
+          <View style={styles.form}>
             <StickerInput
-              label="Room code"
-              code
-              placeholder="XKCD"
-              value={code}
-              onChangeText={edit((t) => setCode(t.toUpperCase()))}
-              maxLength={6}
-              autoCapitalize="characters"
+              label="Your alias"
+              required
+              placeholder="e.g. Backstabber Bob"
+              value={name}
+              onChangeText={edit(setName)}
+              maxLength={20}
+              autoFocus
             />
-          )}
 
-          {error && <Text style={styles.error}>{error}</Text>}
+            {mode === "join" && (
+              <StickerInput
+                label="Room code"
+                code
+                placeholder="XKCD"
+                value={code}
+                onChangeText={edit((t) => setCode(t.toUpperCase()))}
+                maxLength={6}
+                autoCapitalize="characters"
+              />
+            )}
 
-          <StickerButton
-            label={mode === "join" ? "Join the Hunt" : "Create Room"}
-            onPress={handleSubmit}
-            disabled={!canSubmit}
-            loading={isLoading}
-          />
-        </View>
+            {mode === "create" && (
+              <StickerInput
+                label="Room name"
+                required
+                placeholder="e.g. Saturday Showdown"
+                value={roomName}
+                onChangeText={edit(setRoomName)}
+                maxLength={30}
+              />
+            )}
+
+            {error && <Text style={styles.error}>{error}</Text>}
+
+            <StickerButton
+              label={mode === "join" ? "Join the Hunt" : "Create Room"}
+              onPress={handleSubmit}
+              disabled={!canSubmit}
+              loading={isLoading}
+            />
+          </View>
+        )}
 
         {/* How it works — a connected "hunt thread" timeline */}
+        {mode !== "lobbies" && (
         <View style={styles.how}>
           <Text style={styles.howLabel}>The Hunt</Text>
           <View style={styles.howSteps}>
@@ -143,6 +214,7 @@ export default function HomeScreen() {
             </HowStep>
           </View>
         </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -263,6 +335,14 @@ const styles = StyleSheet.create({
     width: "100%",
     maxWidth: 300,
     gap: Spacing.md,
+  },
+  emptyLobbies: {
+    fontFamily: Fonts.body,
+    fontSize: 14,
+    color: Colors.textFaint,
+    textAlign: "center",
+    lineHeight: 20,
+    paddingVertical: Spacing.lg,
   },
   error: {
     fontFamily: Fonts.body,

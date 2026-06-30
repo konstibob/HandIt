@@ -77,7 +77,16 @@ export const getLobby = query({
     }
 
     return {
-      game: { gameCode: game.gameCode, phase: game.phase, winnerName },
+      game: {
+        gameCode: game.gameCode,
+        roomName: game.roomName ?? null,
+        phase: game.phase,
+        winnerName,
+        // Lets the client decide whether to play the start countdown: a game
+        // that just started gets the 3·2·1, while re-entering one that started
+        // a while ago jumps straight in.
+        startedAt: game.startedAt ?? null,
+      },
       players: roster.map((p) => ({
         name: p.name,
         isHost: p.isHost,
@@ -88,19 +97,57 @@ export const getLobby = query({
   },
 });
 
-//has to load on a different screen depending on when player rejoins, isnt currently handled
-//if gamephase is ended you cant join, but if gamephase is joinable you should go to one screen 
-//and if it is started then to another! 
-export const rejoinCheck = query({
-  args: { playerId: v.id("players") },
-  handler: async (ctx, { playerId }) => {
-    const player = await ctx.db.get(playerId);
-    if (!player) return null;
+// Every game this user (device token) is currently in. This is the single
+// source of truth for "which lobbies am I in" — it replaces the old one-session
+// localStorage and powers both the "Your Lobbys" list and all per-game identity
+// lookups on the client. Gated by the secret userId token, so it may return the
+// caller's own private `playerId`s (their per-game bearer credentials); no OTHER
+// player's id or target ever leaves the server here.
+const MY_GAMES_LIMIT = 50;
 
-    const game = await ctx.db.get(player.gameId);
-    if (!game || game.phase === "ended") return null;
+export const myGames = query({
+  args: { userId: v.string() },
+  handler: async (ctx, { userId }) => {
+    const myRows = await ctx.db
+      .query("players")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .take(MY_GAMES_LIMIT);
 
-    return { gameCode: game.gameCode, playerName: player.name };
+    const games = [];
+    for (const me of myRows) {
+      const game = await ctx.db.get(me.gameId);
+      if (!game) continue; // game was deleted — skip (row is effectively orphaned)
+
+      const roster = await playersInGame(ctx, game._id);
+      const aliveCount = roster.filter((p) => p.status === "alive").length;
+      const winnerName = game.winnerId
+        ? roster.find((p) => p._id === game.winnerId)?.name ?? null
+        : null;
+
+      games.push({
+        gameId: game._id,
+        gameCode: game.gameCode,
+        roomName: game.roomName ?? null,
+        playerId: me._id,
+        playerName: me.name,
+        phase: game.phase,
+        yourStatus: me.status,
+        playerCount: roster.length,
+        aliveCount,
+        // Headcount when the game started (null for lobbies not yet started).
+        startedPlayerCount: game.startedPlayerCount ?? null,
+        winnerName,
+        // For sorting newest-first on the client without leaking other data.
+        joinedAt: me._creationTime,
+      });
+    }
+
+    // Active games first (joinable/started before ended), then most-recent first.
+    const rank = (phase: string) => (phase === "ended" ? 1 : 0);
+    games.sort(
+      (a, b) => rank(a.phase) - rank(b.phase) || b.joinedAt - a.joinedAt
+    );
+    return games;
   },
 });
 
@@ -326,8 +373,12 @@ async function eliminate(
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
 export const hostLobby = mutation({
-  args: { name: v.string() },
-  handler: async (ctx, { name }) => {
+  args: {
+    name: v.string(),
+    roomName: v.optional(v.string()),
+    userId: v.optional(v.string()),
+  },
+  handler: async (ctx, { name, roomName, userId }) => {
     // One read: every existing game code. The user explicitly wants all codes
     // so we can generate against the full set in a single pass (no per-attempt
     // round-trips). Avoiding ALL codes — not just active ones — also keeps the
@@ -339,6 +390,7 @@ export const hostLobby = mutation({
 
     const gameId = await ctx.db.insert("games", {
       gameCode,
+      roomName: roomName?.trim() || undefined,
       phase: "joinable",
     });
 
@@ -347,6 +399,7 @@ export const hostLobby = mutation({
       name,
       isHost: true,
       status: "alive",
+      userId,
     });
 
     return { gameId, playerId, gameCode };
@@ -354,8 +407,8 @@ export const hostLobby = mutation({
 });
 
 export const joinGame = mutation({
-  args: { gameCode: v.string(), name: v.string() },
-  handler: async (ctx, { gameCode, name }) => {
+  args: { gameCode: v.string(), name: v.string(), userId: v.optional(v.string()) },
+  handler: async (ctx, { gameCode, name, userId }) => {
     const game = await ctx.db
       .query("games")
       .withIndex("by_gameCode", (q) => q.eq("gameCode", gameCode))
@@ -364,9 +417,18 @@ export const joinGame = mutation({
     if (!game) throw new ConvexError("Lobby not found. Check the code and try again.");
     if (game.phase !== "joinable") throw new ConvexError("This game has already started.");
 
+    const roster = await playersInGame(ctx, game._id);
+
+    // Idempotent re-join: if this user already has a row in this lobby (e.g. a
+    // double-tap or a refresh that re-fires the mutation), return it instead of
+    // inserting a duplicate. Their identity is the userId token.
+    if (userId) {
+      const mine = roster.find((p) => p.userId === userId);
+      if (mine) return { gameId: game._id, playerId: mine._id, gameCode };
+    }
+
     // Names must be unique within a lobby: they're how players refer to each
     // other (target screen, hunt circle, host kicks) once ids are kept private.
-    const roster = await playersInGame(ctx, game._id);
     const wanted = name.trim().toLowerCase();
     if (roster.some((p) => p.name.trim().toLowerCase() === wanted)) {
       throw new ConvexError("That name is already taken in this lobby. Pick another.");
@@ -377,6 +439,7 @@ export const joinGame = mutation({
       name,
       isHost: false,
       status: "alive",
+      userId,
     });
 
     return { gameId: game._id, playerId, gameCode };
@@ -487,6 +550,7 @@ export const startGame = mutation({
       phase: "started",
       winnerId: undefined,
       startedAt: Date.now(),
+      startedPlayerCount: players.length,
     });
 
     await ctx.scheduler.runAfter(0, internal.analytics.capture, {
@@ -513,6 +577,42 @@ export const confirmKilled = mutation({
     if (player.status !== "alive") return null; // already out — no-op
 
     await eliminate(ctx, player, game);
+    return null;
+  },
+});
+
+// One-shot migration: attach a freshly-minted userId token to a player row that
+// predates the multi-lobby feature (created with no userId). The client calls
+// this once on first load if it finds a legacy single-session in localStorage,
+// so an in-progress game isn't lost when we switch to the userId model. No-op if
+// the row already has an owner (don't let one device steal another's row).
+export const claimPlayer = mutation({
+  args: { playerId: v.id("players"), userId: v.string() },
+  handler: async (ctx, { playerId, userId }) => {
+    const player = await ctx.db.get(playerId);
+    if (!player) return null;
+    if (player.userId) return null; // already owned — leave it
+    await ctx.db.patch(playerId, { userId });
+    return null;
+  },
+});
+
+// Remove a game from your "Your Lobbys" list. We don't delete the player row —
+// for ended games the row still backs everyone else's frozen leaderboard / kill
+// feed / ring (see the leaveLobby ended-case note). Clearing userId simply
+// unlinks it from this user's list. Only allowed for ended games and only by the
+// row's owner.
+export const dismissGame = mutation({
+  args: { playerId: v.id("players"), userId: v.string() },
+  handler: async (ctx, { playerId, userId }) => {
+    const player = await ctx.db.get(playerId);
+    if (!player || player.userId !== userId) return null;
+
+    const game = await ctx.db.get(player.gameId);
+    if (game && game.phase !== "ended") {
+      throw new ConvexError("You can only dismiss a finished game.");
+    }
+    await ctx.db.patch(playerId, { userId: undefined });
     return null;
   },
 });

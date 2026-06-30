@@ -4,6 +4,11 @@ import { v } from "convex/values";
 export default defineSchema({
   games: defineTable({
     gameCode: v.string(),
+    // Human-friendly room name the host picks at creation (e.g. "Saturday
+    // Showdown"). Shown in the lobby list and at the top of the game screen so
+    // players can tell their many games apart. Optional: games created before
+    // this feature have none — fall back to the gameCode for display.
+    roomName: v.optional(v.string()),
     phase: v.union(
       v.literal("joinable"),
       v.literal("started"),
@@ -11,6 +16,9 @@ export default defineSchema({
     ),
     // Set when the game ends (2 players remain): the player with the most kills.
     winnerId: v.optional(v.id("players")),
+    // Headcount at the moment the game started, snapshotted in startGame. Powers
+    // the "Started with X players" line (the live roster shrinks as people die).
+    startedPlayerCount: v.optional(v.number()),
     // Wall-clock timestamps (ms) used only for analytics: game duration =
     // endedAt - startedAt. Absent on lobbies that never started.
     startedAt: v.optional(v.number()),
@@ -30,5 +38,14 @@ export default defineSchema({
     eliminatedAt: v.optional(v.number()),
     // Who handed this player the card (set in eliminate()). Powers the kill feed.
     killedBy: v.optional(v.id("players")),
-  }).index("by_gameId", ["gameId"]),
+    // The device/user that owns this player row — a client-generated secret token
+    // (handit_user_id). It's what ties a person's many player rows (one per game)
+    // together, so `myGames` can list every lobby they're in from a single token.
+    // Optional: rows created before this feature have none; also cleared when a
+    // finished game is dismissed from the user's list. Like a player `_id`, it is
+    // a private bearer credential and is NEVER returned by a public roster query.
+    userId: v.optional(v.string()),
+  })
+    .index("by_gameId", ["gameId"])
+    .index("by_userId", ["userId"]),
 });
