@@ -138,8 +138,7 @@ export function GameScreen({ players, playerName, gameCode }: Props) {
             <View style={[styles.card, styles.cardFlat]}>
               <Text style={styles.handedTitle}>Got handed an Item by your Killer?</Text>
               <Text style={styles.copySmall}>
-                If someone slipped you the card, you're out — mark it so your
-                hunter gets the credit.
+                You will be able to spectate the game
               </Text>
               <StickerButton
                 label={armed ? "Tap again — I'm out" : "I was killed"}

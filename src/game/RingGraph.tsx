@@ -37,7 +37,6 @@ export function RingGraph({ circle, you, order, size = 300, nodeSize = 52 }: Pro
   // Names in ring order: the caller's fixed order, or reconstructed from edges.
   const names = order ?? orderAroundCycle(circle.players, circle.edges).map((p) => p.name);
   const n = names.length;
-  const indexByName = new Map(names.map((name, i) => [name, i]));
 
   const cx = size / 2;
   const cy = size / 2;
@@ -50,34 +49,64 @@ export function RingGraph({ circle, you, order, size = 300, nodeSize = 52 }: Pro
     y: cy + R * Math.sin(angle(i)),
   }));
 
-  // Angular gap so each arc starts/ends just outside its node, clamped so a
-  // single-step arc never inverts on itself.
-  const pad = Math.min((nodeR + 7) / R, (TAU / n) * 0.42);
+  // Arrowhead geometry, in radians of arc length so the tip lands precisely on
+  // the target node's rim and the gold line stops at the head's base (never
+  // poking through the triangle).
+  const HEAD_LEN = 11; // px, tip → base along the arc
+  const maxPad = (TAU / n) * 0.42; // keep a single-step arc from inverting
+  const startPad = Math.min((nodeR + 7) / R, maxPad); // gap leaving the source node
+  const tipPad = Math.min((nodeR + 2) / R, maxPad); // tip just off the target rim
+  const headPad = HEAD_LEN / R; // angular length of the arrowhead
 
-  const arrows = circle.edges
-    .map(({ from, to }) => {
-      const fi = indexByName.get(from);
-      const ti = indexByName.get(to);
-      if (fi === undefined || ti === undefined || fi === ti) return null;
+  // The hunt is a single directed cycle through the LIVING players only: each
+  // living node points at the next living node clockwise, wrapping the last back
+  // to the first. Dead players keep their slot as faded nodes but are skipped:
+  //  - adjacent living nodes are joined by a concentric arc that hugs the ring;
+  //  - when one or more dead nodes sit between them, we draw a STRAIGHT line
+  //    from source to target, cutting across the gap so the arrow clearly goes
+  //    "A → C" instead of bowing over the dead node it replaces.
+  const arrows = livingCycleEdges(names, statusByName)
+    .map(({ fi, ti }) => {
+      const steps = (((ti - fi) % n) + n) % n; // clockwise slots spanned
+      if (steps === 1) {
+        const aF = angle(fi) + startPad;
+        const aTip = angle(ti) - tipPad; // where the arrowhead tip lands
+        const aEnd = aTip - headPad; // where the gold line ends (head's base)
+        const sweep = (((aEnd - aF) % TAU) + TAU) % TAU; // clockwise span
+        const large = sweep > Math.PI ? 1 : 0;
 
-      const aF = angle(fi) + pad;
-      const aT = angle(ti) - pad;
-      const sweep = (((aT - aF) % TAU) + TAU) % TAU; // clockwise span
-      const sx = cx + R * Math.cos(aF);
-      const sy = cy + R * Math.sin(aF);
-      const ex = cx + R * Math.cos(aT);
-      const ey = cy + R * Math.sin(aT);
-      const large = sweep > Math.PI ? 1 : 0;
+        const sx = cx + R * Math.cos(aF);
+        const sy = cy + R * Math.sin(aF);
+        const ex = cx + R * Math.cos(aEnd);
+        const ey = cy + R * Math.sin(aEnd);
+        const tipX = cx + R * Math.cos(aTip);
+        const tipY = cy + R * Math.sin(aTip);
 
-      // Arrowhead along the clockwise tangent at the arc's end (sweep flag 1).
-      const tx = -Math.sin(aT);
-      const ty = Math.cos(aT);
+        return {
+          d: `M ${sx} ${sy} A ${R} ${R} 0 ${large} 1 ${ex} ${ey}`,
+          head: arrowHead(tipX, tipY, ex, ey),
+        };
+      }
+
+      // Skips over dead node(s): a straight chord from source rim to target rim.
+      const dx = pos[ti].x - pos[fi].x;
+      const dy = pos[ti].y - pos[fi].y;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+
+      const sx = pos[fi].x + ux * (nodeR + 7);
+      const sy = pos[fi].y + uy * (nodeR + 7);
+      const tipX = pos[ti].x - ux * (nodeR + 2); // tip on the target rim
+      const tipY = pos[ti].y - uy * (nodeR + 2);
+      const ex = tipX - ux * HEAD_LEN; // line ends at the head's base
+      const ey = tipY - uy * HEAD_LEN;
+
       return {
-        d: `M ${sx} ${sy} A ${R} ${R} 0 ${large} 1 ${ex} ${ey}`,
-        head: arrowHead(ex, ey, tx, ty),
+        d: `M ${sx} ${sy} L ${ex} ${ey}`,
+        head: arrowHead(tipX, tipY, ex, ey),
       };
-    })
-    .filter((a): a is { d: string; head: string } => a !== null);
+    });
 
   return (
     <View style={[styles.canvas, { width: size, height: size }]}>
@@ -140,19 +169,38 @@ export function RingGraph({ circle, you, order, size = 300, nodeSize = 52 }: Pro
   );
 }
 
-// Triangle points for an arrowhead whose tip is at (ex,ey), pointing along the
-// unit-ish direction (ux,uy).
-function arrowHead(ex: number, ey: number, ux: number, uy: number): string {
-  const len = Math.hypot(ux, uy) || 1;
-  const dx = ux / len;
-  const dy = uy / len;
-  const size = 11;
-  const bx = ex - dx * size;
-  const by = ey - dy * size;
-  const px = -dy;
-  const py = dx;
-  const w = size * 0.62;
-  return `${ex},${ey} ${bx + px * w},${by + py * w} ${bx - px * w},${by - py * w}`;
+// Triangle points for an arrowhead whose tip is exactly at (tipX,tipY) and whose
+// base is centred at (baseX,baseY) — the point where the gold line ends. The
+// base width spreads perpendicular to the tip→base direction.
+function arrowHead(
+  tipX: number,
+  tipY: number,
+  baseX: number,
+  baseY: number,
+): string {
+  const dx = tipX - baseX;
+  const dy = tipY - baseY;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len; // unit perpendicular
+  const py = dx / len;
+  const w = 6.5; // half-width of the base
+  return `${tipX},${tipY} ${baseX + px * w},${baseY + py * w} ${baseX - px * w},${baseY - py * w}`;
+}
+
+// The living players in ring order, each paired with the next living player
+// (wrapping around). Fewer than two living players means no hunt — no arrows.
+function livingCycleEdges(
+  names: string[],
+  statusByName: Map<string, "alive" | "dead">,
+): { fi: number; ti: number }[] {
+  const living = names
+    .map((name, i) => ({ name, i }))
+    .filter((x) => statusByName.get(x.name) === "alive");
+  if (living.length < 2) return [];
+  return living.map((cur, k) => ({
+    fi: cur.i,
+    ti: living[(k + 1) % living.length].i,
+  }));
 }
 
 // Reconstruct ring order by walking the edge chain, then appending any players
